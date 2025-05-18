@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_2" data-name="图层 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108.38 47.1">
+  <defs>
+    <style>
+      .cls-1 {
+        font-size: 16px;
+      }
+
+      .cls-2 {
+        font-size: 24px;
+      }
+
+      .cls-3 {
+        fill: #008ed1;
+        font-family: Arial-BoldMT, Arial;
+        font-weight: 700;
+      }
+
+      .cls-4 {
+        fill: #fff;
+        stroke: #97999c;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-5 {
+        fill: #0071b9;
+      }
+    </style>
+  </defs>
+  <g id="_图层_1-2" data-name="图层 1">
+    <polygon class="cls-4" points="18.66 16.3 18.66 5.82 9.58 .58 .5 5.82 .5 16.3 9.58 21.55 18.66 16.3"/>
+    <polygon class="cls-4" points="18.66 38.32 18.66 27.83 9.58 22.59 .5 27.83 .5 38.32 9.58 43.56 18.66 38.32"/>
+    <text class="cls-3" transform="translate(3.1 17.06)"><tspan class="cls-1"><tspan x="0" y="0">M etabolite</tspan></tspan><tspan class="cls-1" x="0" y="21">A</tspan><tspan class="cls-2" x="11.55" y="21"> </tspan><tspan class="cls-1" x="18.22" y="21">nnotator</tspan></text>
+    <circle class="cls-5" cx="93.89" cy="27.73" r="2.8"/>
+    <circle class="cls-5" cx="100.64" cy="18.01" r="3.54"/>
+    <circle class="cls-5" cx="104.14" cy="5.81" r="4.24"/>
+  </g>
+</svg>

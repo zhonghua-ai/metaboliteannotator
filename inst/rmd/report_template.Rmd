@@ -1,0 +1,255 @@
+---
+title: "MetFusionAnnotator Processed Report"
+author: "MetFusionAnnotator"
+date: "`r Sys.Date()`"
+output: 
+  word_document:
+    toc: true
+    toc_depth: 3
+params:
+  total_compounds:
+    value: 0
+  step1_time:
+    value: "N/A"
+  step2_time:
+    value: "N/A"
+  output_paths:
+    value:
+      process: "undefined"
+      data: "undefined"
+---
+
+![]('www/icon.svg')
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(knitr)
+library(dplyr)
+```
+
+\newpage
+
+# Introduction
+
+The MetFusionAnnotator application provides an efficient pipeline for metabolomics data processing. This report summarizes the processing steps, results, and performance metrics of your analysis.
+
+
+# Processing Statistics
+
+## Overview
+
+```{r stats-table}
+stats_df <- data.frame(
+  Metric = c("Total Compounds Processed", 
+             "Automated Search Time", 
+             "AI Identification Time"),
+  Value = c(params$total_compounds,
+            params$step1_time,
+            params$step2_time)
+)
+
+kable(stats_df, 
+      format = "simple",
+      col.names = c("Metric", "Value"),
+      align = c("l", "r"),
+      caption = "Processing Statistics Summary")
+```
+
+## Performance Analysis
+
+```{r performance-calc}
+# Calculate processing rate
+proc_rate <- if(params$total_compounds > 0) {
+  time_value <- as.numeric(sub(" sec", "", params$step1_time))
+  if(!is.na(time_value)) {
+    round(time_value/params$total_compounds, 2)
+  } else {
+    "N/A"
+  }
+} else {
+  "N/A"
+}
+```
+
+- **Automated Search Efficiency**: 
+  * **Processed `r params$total_compounds` compounds in `r params$step1_time`**
+  * **Average processing rate: `r proc_rate` seconds per compound**
+
+- **AI Processing Performance**: 
+  * **Total AI identification time: `r params$step2_time`**
+  * **Provides enhanced accuracy for ambiguous compounds**
+  
+
+## Processing Pipeline
+
+Our pipeline consists of four main steps:
+
+### 1. Automated Compound Search
+- **Purpose**: Initial identification and matching of input compounds
+- **Method**: Automated database searching and name matching
+- **Output Location**: `r params$output_paths$process`
+- **Key Files**:
+  * `match_table.csv`: Initial matching results
+  * `all_results.rds`: Detailed search results
+
+### 2. AI-Assisted Identification
+- **Purpose**: Secondary identification for unmatched compounds
+- **Method**: Advanced AI models for compound name analysis
+- **Output Files**:
+  * `AI_identified_cleaned_latest.csv`: Latest AI identification results
+  * `AI_identify_compound_name_*_log.txt`: Detailed identification logs
+
+### 3. Endogenous Verification
+- **Databases Used**:
+  * HMDB (Human Metabolome Database)
+  * mzCloud
+- **Output Files**:
+  * `final_compound_results_with_hmdb.csv`
+  * `final_compound_results_with_mzcloud.csv`
+  * `final_compound_results_with_endogenous.csv`
+
+### 4. External Database Annotation
+- **Purpose**: Biological pathway enrichment analysis
+- **Databases**: KEGG, Reactome, CTD
+- **Output Files**: 
+  * `1.MetFusionAnnotator_Results_KEGG.csv` 
+  * `2.MetFusionAnnotator_Results_Gene.csv`
+  * `3.MetFusionAnnotator_Results_GO.csv`
+  * `4.MetFusionAnnotator_Results_Phenotype.csv`
+  * `5.MetFusionAnnotator_Results_Reactome.csv`
+
+
+# File Organization
+
+## Directory Structure
+
+```{r file-locations}
+locations_df <- data.frame(
+  Directory = c("Process Directory", "Data Directory"),
+  Path = c(params$output_paths$process,
+           params$output_paths$data),
+  Description = c("Contains all processing results and intermediate files",
+                 "Stores reference data and database files")
+)
+
+kable(locations_df, 
+      format = "simple",
+      col.names = c("Directory", "Path", "Description"),
+      align = c("l", "l", "l"),
+      caption = "File System Organization")
+```
+
+## Result Files Explained
+
+This report package includes several result files that provide comprehensive information about your processed compounds. Below is a detailed explanation of each file:
+
+### Primary Result Files
+
+```{r results-files-table}
+results_files_df <- data.frame(
+  Filename = c(
+    "0.MetFusionAnnotator_Results.csv",
+    "1.MetFusionAnnotator_Results_KEGG.csv",
+    "2.MetFusionAnnotator_Results_Gene.csv",
+    "3.MetFusionAnnotator_Results_GO.csv", 
+    "4.MetFusionAnnotator_Results_Phenotype.csv",
+    "5.MetFusionAnnotator_Results_Reactome.csv"
+  ),
+  Description = c(
+    "Main results file containing all identified compounds with their properties and IDs",
+    "KEGG pathway annotations for identified compounds",
+    "Gene interaction data for identified compounds from CTD database",
+    "Gene Ontology (GO) term annotations including Biological Process, Cellular Component, and Molecular Function",
+    "Phenotype associations for identified compounds from CTD database",
+    "Reactome pathway annotations showing biological pathways involving identified compounds"
+  )
+)
+
+kable(results_files_df, 
+      format = "simple",
+      col.names = c("Filename", "Description"),
+      align = c("l", "l"),
+      caption = "Results Files Description")
+```
+
+### Understanding the Files
+
+#### Main Results (0.MetFusionAnnotator_Results.csv)
+This file contains comprehensive information about all processed compounds, including:
+- Original compound names
+- Matched compound names
+- Match confidence scores
+- Database identifiers (PubChem CID, KEGG ID, HMDB ID, ChEBI ID)
+- Endogenous status from both HMDB and mzCloud
+- Similarity scores between input and matched compounds
+
+#### KEGG Pathway Results (1.MetFusionAnnotator_Results_KEGG.csv)
+Contains KEGG pathway annotations for identified compounds, including:
+- Pathway IDs and names
+- Organism information
+- Pathway classes
+- Links to external KEGG resources
+
+#### Gene Interaction Results (2.MetFusionAnnotator_Results_Gene.csv)
+Provides information about gene interactions for identified compounds from the Comparative Toxicogenomics Database (CTD), including:
+- Gene symbols and names
+- Interaction types
+- Organism information
+- Supporting references
+
+#### Gene Ontology Results (3.MetFusionAnnotator_Results_GO.csv)
+Contains Gene Ontology annotations organized by:
+- Biological Process (BP): biological activities involving multiple molecular functions
+- Cellular Component (CC): cellular locations where gene products function
+- Molecular Function (MF): molecular-level activities of gene products
+
+#### Phenotype Association Results (4.MetFusionAnnotator_Results_Phenotype.csv)
+Shows phenotype associations for identified compounds from CTD database:
+- Phenotype names and IDs
+- Interaction types
+- Organism information
+- Supporting evidence
+
+#### Reactome Pathway Results (5.MetFusionAnnotator_Results_Reactome.csv)
+Provides Reactome pathway annotations:
+- Pathway IDs and names
+- Reaction information
+- Links to external Reactome resources
+- Original ChEBI IDs used for mapping
+
+### Other Processing Files
+
+During the processing pipeline, several intermediate files are generated but not included in this package:
+
+- **match_table.csv**: Initial matching results from automated compound search
+- **all_results.rds**: Raw detailed search results
+- **AI_identified_cleaned_latest.csv**: Results from AI-assisted identification
+- **AI_identify_compound_name_*_log.txt**: Detailed logs of AI identification process
+- **final_compound_results_with_hmdb.csv**: Results of HMDB endogenous check
+- **final_compound_results_with_mzcloud.csv**: Results of mzCloud endogenous check
+- **final_compound_results_with_endogenous.csv**: Combined endogenous check results
+
+These intermediate files remain in your process directory for reference and can be examined for more detailed information about the processing steps.
+
+## Key Advantages
+
+1. **Time Efficiency**
+   - Rapid processing of large compound sets
+   - Automated workflows reducing manual intervention
+
+2. **Enhanced Accuracy**
+   - Multi-step verification process
+   - AI-assisted identification for ambiguous cases
+
+3. **Comprehensive Annotation**
+   - Integration of multiple databases
+   - Thorough endogenous compound verification
+
+4. **User-Friendly Output**
+   - Well-organized result files
+   - Clear processing logs
+   - Detailed statistical reports
+
+Thank you for using MetFusionAnnotator. We hope our solution brings efficiency and convenience to your research work!
+
+---
+*Report generated at `r Sys.time()`*

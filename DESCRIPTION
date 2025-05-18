@@ -1,0 +1,38 @@
+Package: MetaboliteAnnotator
+Type: Package
+Title: MetaboliteAnnotator
+Version: 0.1.0
+Author: zhonghua [aut, cre]
+Maintainer: zhonghua <chnzhonghua@stu.xmu.edu.cn>
+Description: A package for auto metabolites annotation.
+License: CC BY-NC-ND
+Encoding: UTF-8
+LazyData: true
+Imports:
+    shiny,
+    shinycssloaders,
+    ellmer,
+    dplyr,
+    KEGGREST,
+    ggplot2,
+    rmarkdown,
+    markdown,
+    eoffice,
+    rstudioapi,
+    httr,
+    knitr,
+    stringr,
+    rvest,
+    ggthemes,
+    digest,
+    magrittr,
+    DT,
+    R.utils,
+    data.table,
+    fst,
+    fstcore,
+    jsonlite,
+    shinyjs,
+    stringdist,
+    future.apply
+RoxygenNote: 7.3.2 
