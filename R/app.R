@@ -1,20 +1,47 @@
-#'
-#' @keywords internal
+source('R/00_app_function.R')
+get_instruction_content <- function() {
+    candidate_paths <- c(
+        "readme.md",
+        "README.md",
+        file.path("..", "readme.md"),
+        file.path("..", "README.md")
+    )
+
+    if (exists("APP_PATHS", envir = .GlobalEnv)) {
+        app_paths <- get("APP_PATHS", envir = .GlobalEnv)
+        candidate_paths <- c(
+            candidate_paths,
+            file.path(app_paths$root, "readme.md"),
+            file.path(app_paths$root, "README.md")
+        )
+    }
+
+    existing_paths <- candidate_paths[file.exists(candidate_paths)]
+
+    if (length(existing_paths) > 0) {
+        return(shiny::includeMarkdown(existing_paths[1]))
+    }
+
+    shiny::tags$div(
+        shiny::tags$p("Instruction file not found. Please ensure README.md is available.")
+    )
+}
+
 ui <- shiny::navbarPage(
     # 修改图标样式
-    title = tags$img(src = "custom/icon.svg",  # 改为使用custom路径
+    title = shiny::tags$img(src = "www/icon.svg",  # 改为使用custom路径
                     height = "40px",
                     style = "margin-top: 0px; margin-right: 10px;"),
     id = "mainTabs",
     windowTitle = "MetaboliteAnnotator",
-    header = tagList(
+    header = shiny::tagList(
        shinyjs::useShinyjs(), # Moved useShinyjs here
-       tags$head(
-           tags$link(href = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap",
+       shiny::tags$head(
+           shiny::tags$link(href = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap",
                      rel = "stylesheet"),
-           tags$link(href = "https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap",
+           shiny::tags$link(href = "https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap",
                      rel = "stylesheet"),
-           tags$style(HTML("
+           shiny::tags$style(HTML("
                /* Overall modern and clean style */
                body {
                    background-color: #ffffff;
@@ -70,7 +97,7 @@ ui <- shiny::navbarPage(
                    font-family: 'JetBrains Mono', Consolas, monospace;
                }
            ")),
-           tags$script(HTML("
+           shiny::tags$script(HTML("
                 // Helper function to update notification positions
                 function updateNotifications() {
                     var notifications = $('.shiny-notification');
@@ -84,15 +111,15 @@ ui <- shiny::navbarPage(
                     setTimeout(updateNotifications, 100);
                 });
            ")),
-           tags$link(rel = "stylesheet", type = "text/css",
+           shiny::tags$link(rel = "stylesheet", type = "text/css",
                      href = "https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css"),
-           tags$script(src = "https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"),
-           tags$script(src = "https://cdn.datatables.net/buttons/2.2.2/js/buttons.colVis.min.js"),
-           tags$link(rel = "stylesheet", type = "text/css",
+           shiny::tags$script(src = "https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"),
+           shiny::tags$script(src = "https://cdn.datatables.net/buttons/2.2.2/js/buttons.colVis.min.js"),
+           shiny::tags$link(rel = "stylesheet", type = "text/css",
                      href = "https://cdn.datatables.net/searchhighlight/1.0.1/dataTables.searchHighlight.css"),
-           tags$script(src = "https://cdn.datatables.net/searchhighlight/1.0.1/dataTables.searchHighlight.min.js"),
-           tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/jquery-highlight/3.7.0/jquery.highlight.min.js"),
-           tags$head(tags$script(HTML('
+           shiny::tags$script(src = "https://cdn.datatables.net/searchhighlight/1.0.1/dataTables.searchHighlight.min.js"),
+           shiny::tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/jquery-highlight/3.7.0/jquery.highlight.min.js"),
+           shiny::tags$head(shiny::tags$script(HTML('
                 Shiny.addCustomMessageHandler("setupConsoleScroll", function(message) {
                     var consoleId = message.consoleId;
                     var $console = $("#" + consoleId);
@@ -119,7 +146,7 @@ ui <- shiny::navbarPage(
 
     tabPanel("0. Instructions",
          fluidPage(
-           includeMarkdown("readme.md")
+           get_instruction_content()
          )
     ),
     tabPanel("1. Compound Auto-search",
@@ -168,7 +195,90 @@ ui <- shiny::navbarPage(
                      # New textAreaInput for AI Identification Prompt (Optional)
                      textAreaInput("ai_prompt",
                                    "AI Identification Prompt (Optional)",
-                                   value = "For non-lipid compounds, the following cases should be considered the same compound:\n1) Suffixes \"-ate\" and \"acid\" are equivalent (e.g., \"Methylmalonate\" and \"Methylmalonic acid\");\n2) Ignore naming variations (e.g., trans/E, allo/alpha, etc.);\n3) DL/D/L configurations are equivalent;\n4) Prefixes \"methyl\" or \"phosphoric acid\" are equivalent;\n5) \"alpha\" equals Greek letter alpha, \"beta\" equals Greek letter beta, \"gamma\" equals Greek letter gamma, but distinguish alpha/beta/gamma forms!;\n6) Tautomers are equivalent;\n7) Resonance structures are equivalent;\n8) Hydrates or solvates are equivalent (e.g., CuSO4 and CuSO4_5H2O);\n9) Different ionization states are equivalent;\n10) Different salt forms are equivalent (e.g., sodium and potassium salts);\n11) Isotope variants are equivalent (unless specified);\n20) Inorganic and organic forms of the same compound are equivalent.\n\nFor lipid compounds, carefully check structural differences. For example, LPC(13:0) and LPC 18:1 should be considered different compounds due to different carbon chain lengths and saturation.\n\nAlways carefully compare oxidation states and structural positions!\nProstaglandin compounds (e.g., PGE2, PGD2) should be strictly distinguished based on their core structure and functional groups!",
+                                   value = "You are an expert in “compound name matching/deduplication.” Given a target compound X and a candidate set Group A (separated by ||), determine whether X represents the same compound as any item in Group A. If there is a match, output only the exact original name from Group A (just 1 item); if there is no match, output FALSE. No explanations, punctuation, quotation marks, or code blocks are allowed.
+                                            1. Input specifications and preprocessing (for comparison only; the output must preserve the original candidate)
+                                            
+                                            Splitting & cleaning: Split Group A by || → trim leading/trailing whitespace → remove zero-width characters (ZWSP/ZWNBSP/ZWJ/ZWNJ/BOM) → discard empty entries.
+                                            
+                                            Unicode normalization: Convert the versions of X and each candidate used for comparison to NFC; normalize all types of dashes/minus signs (–—− etc.) to -; convert full-width to half-width characters.
+                                            
+                                            Character equivalence table: Greek letters and their spelled-out equivalents are interchangeable (α/alpha, β/beta, …); cis/trans ↔ Z/E standardized by meaning; R/S, D/L/DL standardized.
+                                            
+                                            Ambiguous “D” handling:
+                                            
+                                            Treat as deuterium isotope only when explicit patterns appear: [dX], -dX, ^2H, U-^2H;
+                                            D-/L- in names like D-glucose, L-lactate are treated as chiral descriptors.
+                                            
+                                            Acid/salt/ionization/hydrate: Normalize descriptions (retain stoichiometry); metal complexation or coordination that changes the backbone/oxidation state is considered nonequivalent.
+                                            
+                                            2. Category determination (PG takes precedence over lipids)
+                                            
+                                            Match the following patterns in order (first hit defines the category; do not downgrade afterward):
+                                            
+                                            Prostaglandin PG class: ^(PG[DEFI]/*|TX[A-B]/*|prostacyclin|thromboxane) or common variants (e.g., TXA2/TXB2, PGI2 = prostacyclin).
+                                            
+                                            Lipids: Headgroup/abbreviation whitelist (FA/PC/PE/PI/PS/LPC/SM/TAG/DG/Cer/HexCer/GM…) or syntax like Headgroup(carbon_count:double_bonds).
+                                            
+                                            Other (non-lipid).
+                                            
+                                            3. Equivalence rules and priority
+                                            A. Non-lipids (relatively lenient)
+                                            
+                                            A1 Acid/conjugate base equivalence: -ic acid ↔ -ate.
+                                            
+                                            A2 Naming variants ignored: E/trans, allo/alpha, etc., but must not alter substitution position/oxidation state.
+                                            
+                                            A3 Chirality: When strict_chirality = FALSE, D/L/DL are equivalent; when TRUE, they must match.
+                                            
+                                            A4–A7: Tautomerism, solvation/hydration, ionization state, and salt forms are equivalent when strict_salt_equivalence = TRUE.
+                                            
+                                            A8 Isotopes: Equivalent by default; if either side has explicit isotope labeling ([dX], ^13C, U-^15N, …), they must match exactly.
+                                            
+                                            A10 Oxidation state/substitution position: Both must match strictly; differences render nonequivalence. Phosphate/phosphoric acid are handled under A1/A10 only if the backbone and substitution positions are unchanged.
+                                            
+                                            B. Lipids (strict, hierarchical)
+                                            
+                                            Definition of matching granularity:
+                                            
+                                            B0 Species-resolved: chains/positions/double-bond sites and Z/E, sn positions/linkage types (O-/P-), oxidation/hydroxyl/epoxy positions all specified.
+                                            
+                                            B1 Molecular-species: chain composition given but no sn; double-bond positions unknown.
+                                            
+                                            B2 Sum-composition: only total carbon count and unsaturation.
+                                            
+                                            Matching principles: Allow downgrading from finer to coarser granularity only if allow_lipid_downgrade = TRUE; otherwise only same-level matches. Any of the following differences makes them nonequivalent: headgroup type, number of chains, per-chain carbon count/unsaturation, double-bond positions/EZ, sn/linkage type (including Lyso, O-/P-), oxidation/hydroxyl/epoxy positions, and stereochemistry where required.
+                                            
+                                            Example: PC 34:1 ≡ PC 16:0_18:1 (B2 ↔ B1, requires allow_lipid_downgrade = TRUE); not equivalent to PE 34:1 or PC O-34:1.
+                                            
+                                            C. Prostaglandins (most strict)
+                                            
+                                            Subclass (PGE/PGD/PGF/PGI/TX) must match; α/β suffix strictly distinguished; backbone functional-group pattern must match; all oxidation/reduction/dehydroxy positions must match. Example: TXB2 ≠ TXA2; 11-dehydro-TXB2 is equivalent only to the identically named form.
+                                            
+                                            4. Isotopes and salt forms (unified ruling)
+                                            
+                                            isotope_must_match = CONDITIONAL: if explicit labeling is present, match exactly; otherwise ignore.
+                                            
+                                            strict_salt_equivalence = TRUE: different counterions (HCl, TFA, Na, K, Ca, NH4, …) and stoichiometries (mono-/di-sodium, etc.) are considered equivalent, provided the backbone/oxidation state/substitution positions are unchanged.
+                                            
+                                            5. Concurrent hits and tie-breaking
+                                            
+                                            If multiple candidates are equivalent:
+                                            
+                                            Finer granularity takes precedence (B0 > B1 > B2; PG and non-PG are not interchangeable);
+                                            
+                                            If granularity is the same, return the earliest item appearing in Group A.
+                                            
+                                            6. Output requirements (mandatory)
+                                            
+                                            Only two possibilities: on match → return that candidate’s original string (single line, original case/characters); on no match → FALSE.
+                                            
+                                            Output assertions: All must be satisfied, otherwise output FALSE:
+                                            
+                                            Single line, no leading/trailing whitespace, no zero-width characters, NFC;
+                                            
+                                            If not FALSE, its value must exactly equal one of the trimmed members from Group A;
+                                            
+                                            FALSE must be five ASCII uppercase letters.",
                                    rows = 8),
 
                      helpText("This optional prompt will be sent to the AI."),
@@ -293,7 +403,7 @@ ui <- shiny::navbarPage(
              ),
              div(
                  style = "margin-bottom: 10px;",
-                 tags$em("Last updated: "),
+                 shiny::tags$em("Last updated: "),
                  textOutput("lastUpdateTime", inline = TRUE)
              ),
              DT::DTOutput("finalResultsTable"),
@@ -335,7 +445,7 @@ ui <- shiny::navbarPage(
                 div(
                     id = "speciesLoadingIndicator",
                     style = "display: none;",
-                    tags$span(class = "loading-spinner"),
+                    shiny::tags$span(class = "loading-spinner"),
                     "Loading species data..."
                 ),
 
@@ -344,10 +454,10 @@ ui <- shiny::navbarPage(
                 shiny::actionButton("runKegg", "Start external database annotation", class = "btn-primary"),
                 shiny::actionButton("copyCID", "Copy CID", class = "btn-secondary", style = "width: 100%; margin-top: 10px;"),
                 shiny::actionButton("copyKEGGHMDB", "Copy KEGG ID + HMDB ID)", class = "btn-secondary", style = "width: 100%; margin-top: 5px;"),
-                tags$div(
-                  tags$a(href = "https://csbg.cnb.csic.es/mbrole3/analysis.php", target = "_blank", "MBROLE3"),
-                  tags$br(),
-                  tags$a(href = "https://www.metaboanalyst.ca/MetaboAnalyst/upload/EnrichUploadView.xhtml", target = "_blank", "MetaboAnalyst")
+                shiny::tags$div(
+                  shiny::tags$a(href = "https://csbg.cnb.csic.es/mbrole3/analysis.php", target = "_blank", "MBROLE3"),
+                  shiny::tags$br(),
+                  shiny::tags$a(href = "https://www.metaboanalyst.ca/MetaboAnalyst/upload/EnrichUploadView.xhtml", target = "_blank", "MetaboAnalyst")
                 )
             ),
             mainPanel(
@@ -516,7 +626,7 @@ server <- function(input, output, session) {
                 }
 
                 match_table_path <- file.path(APP_PATHS$process, "match_table.csv")
-                results_path <- file.path(APP_PATHS$process, "all_results.rds")
+                results_path <- file.path(APP_PATHS$process, "step1_results.rds")
 
                 if (!file.exists(match_table_path)) {
                     stop("Cannot find compound match table file, please complete compound search step first")
@@ -526,10 +636,11 @@ server <- function(input, output, session) {
                 }
 
                 match_table <- read.csv(match_table_path)
+                match_table$exact_match <- tolower(as.character(match_table$exact_match)) %in% c("true", "1", "t")
                 results <- readRDS(results_path)
 
                 ai_process_cpd_names <- match_table |>
-                    dplyr::filter(exact_match != 'TRUE') |>
+                    dplyr::filter(is.na(exact_match) | !exact_match) |>
                     dplyr::pull(compound_name)
 
                 if (length(ai_process_cpd_names) == 0) {
@@ -554,7 +665,7 @@ server <- function(input, output, session) {
 
                     # --- 新增代码：生成 final_compound_results.csv ---
                     match_table_path <- file.path(APP_PATHS$process, "match_table.csv")
-                    results_path <- file.path(APP_PATHS$process, "all_results.rds")
+                    results_path <- file.path(APP_PATHS$process, "step1_results.rds")
                     if (!file.exists(match_table_path)) {
                         stop("Cannot find compound match table file, please complete compound search step first")
                     }
@@ -562,6 +673,7 @@ server <- function(input, output, session) {
                         stop("Cannot find search results file, please complete compound search step first")
                     }
                     match_table <- read.csv(match_table_path)
+                    match_table$exact_match <- tolower(as.character(match_table$exact_match)) %in% c("true", "1", "t")
                     results <- readRDS(results_path)
 
                     final_results <- data.frame(
@@ -577,11 +689,14 @@ server <- function(input, output, session) {
                         CHEBI_ID = NA_character_,
                         CTD = NA_character_,
                         Similarity = NA_real_,
+                        Tag = NA_character_,
                         stringsAsFactors = FALSE
                     )
 
+                    final_results$Tag <- ifelse(match_table$exact_match, "Exact", "AI-assisted")
+
                     # 处理 exact 匹配的化合物
-                    exact_matches <- match_table$compound_name[match_table$exact_match == 'TRUE']
+                    exact_matches <- match_table$compound_name[match_table$exact_match]
                     for (cpd in exact_matches) {
                         idx <- which(final_results$compound_name == cpd)
                         if (length(idx) > 0 && !is.null(results[[cpd]]$all_results) && nrow(results[[cpd]]$all_results) > 0) {
@@ -598,7 +713,8 @@ server <- function(input, output, session) {
                                 HMDB_ID = as.character(result_row$HMDB_ID[1]),
                                 CHEBI_ID = as.character(result_row$CHEBI_ID[1]),
                                 CTD = as.character(result_row$CTD[1]),
-                                Similarity = 1
+                                Similarity = 1,
+                                Tag = "Exact"
                             )
                         }
                     }
@@ -995,12 +1111,17 @@ server <- function(input, output, session) {
                     log_message("Initializing selection column with default result1")
                     ai_results_df$selection <- ai_results_df$result1
                 }
+                ai_results_rds_path <- file.path(APP_PATHS$process, sprintf("AI_identified_cleaned_%s.rds", input$model))
+                latest_results_rds_path <- file.path(APP_PATHS$process, "AI_identified_cleaned_latest.rds")
+                saveRDS(ai_results_df, ai_results_rds_path)
+                file.copy(ai_results_rds_path, latest_results_rds_path, overwrite = TRUE)
+                log_message(sprintf("AI identification results RDS saved to: %s", ai_results_rds_path))
 
                 results <- compound_results()
                 if (is.null(results)) {
                   tryCatch(
                     {
-                      results <- readRDS(file.path(APP_PATHS$process, "all_results.rds"))
+                      results <- readRDS(file.path(APP_PATHS$process, "step1_results.rds"))
                     },
                     error = function(e) {
                       stop("Compound results not found")
@@ -1027,10 +1148,13 @@ server <- function(input, output, session) {
                     CHEBI_ID = NA_character_,
                     CTD = NA_character_,
                     Similarity = NA_real_,
+                    Tag = NA_character_,
                     stringsAsFactors = FALSE
                 )
 
-                exact_matches <- match_table$compound_name[match_table$exact_match == 'TRUE']
+                final_results$Tag <- ifelse(match_table$exact_match, "Exact", "AI-assisted")
+
+                exact_matches <- match_table$compound_name[match_table$exact_match]
                 log_message(sprintf("Processing %d exact matches", length(exact_matches)))
 
                 i <- 0
@@ -1044,19 +1168,20 @@ server <- function(input, output, session) {
                             matched_name     = if(length(result_row$SearchName) > 0) result_row$SearchName[1] else NA_character_,
                             final_result     = "TRUE",
                             CID              = if(length(result_row$CID) > 0) as.integer(result_row$CID[1]) else NA_integer_,
-                IUPACName        = if(length(result_row$IUPACName) > 0) as.character(result_row$IUPACName[1]) else NA_character_,
-                MolecularFormula = if(length(result_row$MolecularFormula) > 0) as.character(result_row$MolecularFormula[1]) else NA_character_,
-                MolecularWeight  = if(length(result_row$MolecularWeight) > 0) as.numeric(result_row$MolecularWeight[1]) else NA_real_,
-                KEGG_ID          = if(length(result_row$KEGG_ID) > 0) as.character(result_row$KEGG_ID[1]) else NA_character_,
-                HMDB_ID          = if(length(result_row$HMDB_ID) > 0) as.character(result_row$HMDB_ID[1]) else NA_character_,
+                            IUPACName        = if(length(result_row$IUPACName) > 0) as.character(result_row$IUPACName[1]) else NA_character_,
+                            MolecularFormula = if(length(result_row$MolecularFormula) > 0) as.character(result_row$MolecularFormula[1]) else NA_character_,
+                            MolecularWeight  = if(length(result_row$MolecularWeight) > 0) as.numeric(result_row$MolecularWeight[1]) else NA_real_,
+                            KEGG_ID          = if(length(result_row$KEGG_ID) > 0) as.character(result_row$KEGG_ID[1]) else NA_character_,
+                            HMDB_ID          = if(length(result_row$HMDB_ID) > 0) as.character(result_row$HMDB_ID[1]) else NA_character_,
                             CHEBI_ID         = if(length(result_row$CHEBI_ID) > 0) as.character(result_row$CHEBI_ID[1]) else NA_character_,
                             CTD              = if(length(result_row$CTD) > 0) as.character(result_row$CTD[1]) else NA_character_,
-                            Similarity       = 1
+                            Similarity       = 1,
+                            Tag              = "Exact"
                         )
                     }
                 }
 
-                ai_compounds <- match_table$compound_name[match_table$exact_match != 'TRUE']
+                ai_compounds <- match_table$compound_name[is.na(match_table$exact_match) | !match_table$exact_match]
                 log_message(sprintf("Processing %d compounds requiring AI identification", length(ai_compounds)))
 
                 j <- 0
@@ -1067,6 +1192,7 @@ server <- function(input, output, session) {
                         log_message(sprintf("Warning: Could not find index for AI compound: %s", cpd_name))
                         next
                     }
+                    ai_results_df <- readRDS(file.path(file.path(APP_PATHS$process, 'AI_identified_cleaned_latest.rds')))
                     if (cpd_name %in% ai_results_df$compound_name) {
                         compound_row <- ai_results_df[ai_results_df$compound_name == cpd_name, ]
                         selected_name <- compound_row$selection
@@ -1088,7 +1214,8 @@ server <- function(input, output, session) {
                                         HMDB_ID = if(length(selected_row$HMDB_ID) > 0) as.character(selected_row$HMDB_ID[1]) else NA_character_,
                                         CHEBI_ID = if(length(selected_row$CHEBI_ID) > 0) as.character(selected_row$CHEBI_ID[1]) else NA_character_,
                                         CTD = if(length(selected_row$CTD) > 0) as.character(selected_row$CTD[1]) else NA_character_,
-                                        Similarity = if(length(selected_row$Similarity) > 0) as.numeric(selected_row$Similarity[1]) else NA_real_
+                                        Similarity = if(length(selected_row$Similarity) > 0) as.numeric(selected_row$Similarity[1]) else NA_real_,
+                                        Tag = "AI-assisted"
                                     )
                                     next
                                 }
@@ -1096,11 +1223,21 @@ server <- function(input, output, session) {
                         }
                     }
                     final_results[idx, "final_result"] <- "FALSE"
+                    final_results[idx, "Tag"] <- "AI-assisted"
                 }
 
                 final_results_path <- file.path(APP_PATHS$process, 'final_compound_results.csv')
-                write.csv(final_results, final_results_path, row.names = FALSE)
-
+                metabo_file <- file.path(APP_PATHS$process, "metabo_name.txt")
+                name_list <- tryCatch({
+                  scan(metabo_file, what = "character", sep = "\n", quiet = TRUE)
+                }, error = function(e) {
+                  stop(sprintf("Cannot read file %s: %s", metabo_file, e$message))
+                })
+                
+                ord <- match(final_results$compound_name, name_list)
+                final_results_update_ord <- final_results[order(ord, na.last = TRUE), ]
+                
+                write.csv(final_results_update_ord, final_results_path, row.names = FALSE)
                 log_message(sprintf("Results saved to: %s", final_results_path))
                 exact_match_compound_info <- final_results |> dplyr::filter(compound_name %in% exact_matches)
                 exact_match_compound_info_path <- file.path(APP_PATHS$process, 'Step2-Compound_results(exact match).csv')
@@ -1110,149 +1247,18 @@ server <- function(input, output, session) {
                 ai_match_compound_info_path <- file.path(APP_PATHS$process, 'Step2-Compound_results(AI-assisted match).csv')
                 write.csv(ai_match_compound_info, ai_match_compound_info_path, row.names = FALSE)
                 log_message(sprintf("AI-assisted Results saved to: %s", ai_match_compound_info_path))
+                step_status$ai_complete <- TRUE
+                shiny::updateTabsetPanel(session, "mainTabs", selected = "3. Source Check (Endogenous)")
+                showNotification("Results saved successfully", type = "message")
 
-                ## --- Add: Process addition state compound information ---
-                tryCatch({
-                    cid_parent_file <- file.path(APP_PATHS$data, "pubchem_info", "CID-Parent.fst")
-                    cid_parent_file_last_update_time <- file.path(APP_PATHS$data, "pubchem_info", "cid_parent_lastest_update_time.rds")
-
-                    # if cid_parent_file or cid_parent_file_last_update_time is not exist, then update the latest data, if the file exists and the last update time is more than 7 days, then update the latest data
-                    if (!file.exists(cid_parent_file) || !file.exists(cid_parent_file_last_update_time)) {
-                       update_pubchem_data()
-                    } else {
-                       last_update <- readRDS(cid_parent_file_last_update_time)
-                       if (difftime(Sys.Date(), last_update, units = "days") > 7) {
-                         update_pubchem_data()
-                       }
-                    }
-
-                    if (file.exists(cid_parent_file)) {
-                        if (!requireNamespace("fst", quietly = TRUE)) {
-                            log_message("Package 'fst' is not available. Please install it to process addition state compounds.", tag = "ERROR")
-                        } else {
-                            cid_parent_data <- fst::read_fst(cid_parent_file)
-                            if (!all(c("CID", "Parent") %in% names(cid_parent_data))) {
-                                log_message("CID-Parent.fst file does not contain required columns 'CID' and 'Parent'.", tag = "ERROR")
-                            } else {
-                                idx_addition <- which(grepl("[-+]", final_results$MolecularFormula))
-                                if (length(idx_addition) > 0) {
-                                    compound_need_address_additionstate <- final_results$CID[idx_addition]
-                                    for (i in idx_addition) {
-                                        compound_cid <- final_results$CID[i]
-                                        parent_info <- cid_parent_data[cid_parent_data$CID == compound_cid, ]
-                                        if (nrow(parent_info) > 0) {
-                                            parent_cid <- parent_info$Parent[1]
-                                            search_url <- sprintf(
-                                              "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/%s/property/IUPACName,MolecularFormula,MolecularWeight,CanonicalSMILES,IsomericSMILES,InChI,InChIKey/JSON",
-                                              parent_cid
-                                            )
-                                            response <- tryCatch({
-                                                httr::GET(search_url)
-                                            }, error = function(e) {
-                                                log_message(sprintf("Error during GET request for parent CID %s: %s", parent_cid, e$message), tag = "ERROR")
-                                                NULL
-                                            })
-
-                                            if (!is.null(response) && httr::status_code(response) == 200) {
-                                                result_json <- tryCatch({
-                                                    jsonlite::fromJSON(rawToChar(response$content))
-                                                }, error = function(e) {
-                                                    log_message(sprintf("Error parsing JSON for parent CID %s: %s", parent_cid, e$message), tag = "ERROR")
-                                                    NULL
-                                                })
-
-                                                if (!is.null(result_json) &&
-                                                    !is.null(result_json$PropertyTable) &&
-                                                    !is.null(result_json$PropertyTable$Properties)) {
-                                                    result_data <- as.data.frame(result_json$PropertyTable$Properties, stringsAsFactors = FALSE)
-                                                    if (nrow(result_data) > 0) {
-                                                        result_row <- result_data[1, , drop = FALSE]
-                                                        # source(file.path(APP_PATHS$R,'pubchem_cpd_search.R'))
-                                                        cid_kegg_info <- get_kegg_id(parent_cid)
-                                                        final_results[i, "matched_name"] <- as.character(result_row$IUPACName[1])
-                                                        final_results[i, "final_result"] <- "TRUE"
-                                                        final_results[i, "CID"] <- as.integer(result_row$CID[1])
-                                                        final_results[i, "IUPACName"] <- as.character(result_row$IUPACName[1])
-                                                        final_results[i, "MolecularFormula"] <- as.character(result_row$MolecularFormula[1])
-                                                        final_results[i, "MolecularWeight"] <- as.numeric(result_row$MolecularWeight[1])
-
-                                                        final_results[i, "KEGG_ID"] <- if(length(cid_kegg_info$KEGG) > 0) as.character(cid_kegg_info$KEGG[1]) else 'Not_Access'
-                                                        final_results[i, "HMDB_ID"] <- if(length(cid_kegg_info$HMDB) > 0) as.character(cid_kegg_info$HMDB[1]) else 'Not_Access'
-                                                        final_results[i, "CHEBI_ID"] <- if(length(cid_kegg_info$CHEBI) > 0) as.character(cid_kegg_info$CHEBI[1]) else 'Not_Access'
-                                                        final_results[i, "CTD"] <- if(length(cid_kegg_info$CTD) > 0) as.character(cid_kegg_info$CTD[1]) else 'Not_Access'
-                                                        final_results[i, "Similarity"] <- 1
-                                                        log_message(sprintf("Updated addition state info for compound CID %s using parent CID %s", compound_cid, parent_cid))
-                                                        Sys.sleep(0.1)
-                                                    }
-                                                } else {
-                                                    log_message(sprintf("HTTP request failed for parent CID %s", parent_cid), tag = "ERROR")
-                                                }
-                                            } else {
-                                                log_message(sprintf("HTTP request failed for parent CID %s", parent_cid), tag = "ERROR")
-                                            }
-                                        } else {
-                                            log_message(sprintf("No parent info found for compound CID %s in CID-Parent.fst", compound_cid), tag = "WARNING")
-                                        }
-                                    }
-
-                                    # 对有CID但是HMDB ID没有查询到的化合物再执行一次Get_kegg_id
-                                    temp_final_results_external_id <- final_results[!final_results$CID %in% c('Not_Access','NA'),]
-                                    
-                                    # 找出temp_final_results_external_id中HMDB_ID缺失的行
-                                    rows_hmdb_not_found <- which(temp_final_results_external_id$HMDB_ID %in% c('Not_Access','NA'))
-                                    
-                                    if (length(rows_hmdb_not_found) > 0) {
-                                        for(i in rows_hmdb_not_found){
-                                            # 获取当前CID
-                                            current_cid <- temp_final_results_external_id$CID[i]
-                                            
-                                            # 获取该CID在原始final_results中的索引位置
-                                            original_idx <- which(final_results$CID == current_cid)
-                                            
-                                            # 使用get_kegg_id获取信息
-                                            cid_kegg_info <- get_kegg_id(current_cid)
-                                            
-                                            # 更新原始final_results中对应行的信息
-                                            final_results$HMDB_ID[original_idx] <- if(length(cid_kegg_info$HMDB) > 0) as.character(cid_kegg_info$HMDB[1]) else 'Not_Access'
-                                            final_results$KEGG_ID[original_idx] <- if(length(cid_kegg_info$KEGG) > 0) as.character(cid_kegg_info$KEGG[1]) else 'Not_Access'
-                                            final_results$CHEBI_ID[original_idx] <- if(length(cid_kegg_info$CHEBI) > 0) as.character(cid_kegg_info$CHEBI[1]) else 'Not_Access'
-                                            final_results$CTD[original_idx] <- if(length(cid_kegg_info$CTD) > 0) as.character(cid_kegg_info$CTD[1]) else 'Not_Access'
-                                        }
-                                    }
-
-                                    write.csv(final_results, final_results_path, row.names = FALSE)
-                                    log_message("Final_results updated with addition state compounds info!")
-
-                                    exact_match_compound_info <- final_results |> dplyr::filter(compound_name %in% exact_matches)
-                                    exact_match_compound_info_path <- file.path(APP_PATHS$process, 'Step2-Compound_results(exact match).csv')
-                                    write.csv(exact_match_compound_info, exact_match_compound_info_path, row.names = FALSE)
-                                    log_message(sprintf("(Update_Addition_Statu)Exact Match Results saved to: %s", exact_match_compound_info_path))
-                                    ai_match_compound_info <- final_results |> dplyr::filter(compound_name %in% ai_compounds)
-                                    ai_match_compound_info_path <- file.path(APP_PATHS$process, 'Step2-Compound_results(AI-assisted match).csv')
-                                    write.csv(ai_match_compound_info, ai_match_compound_info_path, row.names = FALSE)
-                                    log_message(sprintf("(Update_Addition_Statu)AI-assisted Results saved to: %s", ai_match_compound_info_path))
-                                } else {
-                                    log_message("No compounds with addition state found in MolecularFormula")
-                                }
-                            }
-                        }
-                    }
-                    ## --- Add: End of new part ---
-
-                    step_status$ai_complete <- TRUE
-                    shiny::updateTabsetPanel(session, "mainTabs", selected = "3. Source Check (Endogenous)")
-
-                    showNotification("Results saved successfully", type = "message")
-
-                }, error = function(e) {
-                    log_message(sprintf("Error processing results: %s", e$message), tag = "ERROR")
-                    showNotification(sprintf("Error: %s", e$message), type = "error")
-                    }, finally = {
-                        # Restore button status after processing
-                        enable("confirmAIResults")
-                        shinyjs::removeClass("confirmAIResults", "btn-loading")
-                    })
-                })
+            }, error = function(e) {
+                log_message(sprintf("Error processing results: %s", e$message), tag = "ERROR")
+                showNotification(sprintf("Error: %s", e$message), type = "error")
+            }, finally = {
+                # Restore button status after processing
+                enable("confirmAIResults")
+                shinyjs::removeClass("confirmAIResults", "btn-loading")
+            })
         })
     })
 
@@ -1261,12 +1267,13 @@ server <- function(input, output, session) {
             withConsoleRedirect("aiConsole", {
                 tryCatch({
                     match_table <- read.csv(file.path(APP_PATHS$process, "match_table.csv"))
-                    results <- readRDS(file.path(APP_PATHS$process, "all_results.rds"))
+                    match_table$exact_match <- tolower(as.character(match_table$exact_match)) %in% c("true", "1", "t")
+                    results <- readRDS(file.path(APP_PATHS$process, "step1_results.rds"))
 
                     compound_results(results)
 
                     ai_process_cpd_names <- match_table |>
-                        dplyr::filter(exact_match != 'TRUE') |>
+                        dplyr::filter(is.na(exact_match) | !exact_match) |>
                         dplyr::pull(compound_name)
 
                     log_message(sprintf("Loaded %d compound data", nrow(match_table)))
@@ -1293,12 +1300,13 @@ server <- function(input, output, session) {
         withConsoleRedirect("aiConsole", {
             tryCatch({
                 match_table <- read.csv(file.path(APP_PATHS$process, "match_table.csv"))
-                results <- readRDS(file.path(APP_PATHS$process, "all_results.rds"))
+                match_table$exact_match <- tolower(as.character(match_table$exact_match)) %in% c("true", "1", "t")
+                results <- readRDS(file.path(APP_PATHS$process, "step1_results.rds"))
 
                 compound_results(results)
 
                 ai_process_cpd_names <- match_table |>
-                    dplyr::filter(exact_match != 'TRUE') |>
+                    dplyr::filter(is.na(exact_match) | !exact_match) |>
                     dplyr::pull(compound_name)
 
                 log_message(sprintf("Loaded %d compound data", nrow(match_table)))
@@ -2040,16 +2048,20 @@ server <- function(input, output, session) {
     })
 }
 
-#' Run Shiny UI
-#'
-#' This function launches the Shiny application.
-#'
-#' @export
-run_ui <- function() {
-    if (!exists("APP_PATHS", envir = .GlobalEnv)) {
-       stop("Please call init_app() first to initialize the working directory")
-    }
-    suppressWarnings(shiny::shinyApp(ui = ui, server = server))
-}
+#' Construct Shiny application object
+app <- shiny::shinyApp(ui = ui, server = server)
 
+#' #' Run Shiny UI
+#' #'
+#' #' This function launches the Shiny application.
+#' #'
+#' #' @export
+#' run_ui <- function() {
+#'     if (!exists("APP_PATHS", envir = .GlobalEnv)) {
+#'        stop("Please call init_app() first to initialize the working directory")
+#'     }
+#'     suppressWarnings(app)
+#' }
 
+# Return the app object when this file is sourced via shiny::runApp
+app

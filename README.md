@@ -4,7 +4,7 @@
 
 > **Note:** The data linked with this package is integrated from the sources: `Pubchem`, `HMDB`, `mzCloud`, `KEGG`, `CTD`, `Reactome`, `ChEBI`. Detailed information please refer to the `Data sources` section.
 
-<img src="custom/roadmap.png" alt="MetaboliteAnnotator Workflow" width="1000" />
+<img src="inst/www/roadmap.png" alt="MetaboliteAnnotator Workflow" width="1000" />
 
 ## Features
 - Real time database update
@@ -81,4 +81,3 @@
 ```bibtex
 test_bibtex
 ```
-

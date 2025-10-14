@@ -7,6 +7,7 @@
 #' @return A list of directory paths including root, R, data, process, and cache directories.
 #'
 #' @export
+
 init_app <- function(work_path) {
 
   # create relevant directories
@@ -380,6 +381,7 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
   })
 
   name_list_unique <- unique(name_list)
+  saveRDS(name_list_unique,file.path(APP_PATHS$process,'name_list_unique.rds'))
 
   if (length(name_list_unique) == 0) {
     stop("No valid compound names")
@@ -394,11 +396,45 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
     log_message("Cache retained, will continue processing unfinished compounds")
   }
 
-
-
   all_results <- list()
   log_message('Step1: Processing compounds with backgroud database...')
+  
+  final_cols <- c(
+    "CID",
+    "MolecularFormula",
+    "MolecularWeight",
+    "CanonicalSMILES",
+    "IsomericSMILES",
+    "InChI",
+    "InChIKey",
+    "IUPACName",
+    "KEGG_ID",
+    "HMDB_ID",
+    "CHEBI_ID",
+    "CTD",
+    "SearchName",
+    "Similarity"
+  )
+  empty_compound_df <- data.frame(
+    CID = character(),
+    MolecularFormula = character(),
+    MolecularWeight = numeric(),
+    CanonicalSMILES = character(),
+    IsomericSMILES = character(),
+    InChI = character(),
+    InChIKey = character(),
+    IUPACName = character(),
+    KEGG_ID = character(),
+    HMDB_ID = character(),
+    CHEBI_ID = character(),
+    CTD = character(),
+    SearchName = character(),
+    Similarity = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
   match_with_backgroud_db <- function(compound_name){
+    verbose = FALSE
     
     clean_name <- function(x) {
       # 1. Remove the "(...)" part at the end
@@ -476,13 +512,11 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
     # This allows the rest of the function to proceed, relying solely on API searches.
     if (is.null(name_db) || nrow(name_db) == 0) {
       name_map_df$pubchem_cid <- NA
-      name_map_df$inchikey <- NA
-      name_map_df$smiles <- NA
       name_map_df_merged_db <- name_map_df
       if (verbose) log_message("Local database not available or empty. Relying on API searches.", tag = "WARNING")
     } else {
       # Ensure required columns exist in name_db before merge
-      required_db_cols <- c('cleaned_Metabolite_name_lc', 'pubchem_cid', 'inchikey', 'smiles')
+      required_db_cols <- c('cleaned_Metabolite_name_lc', 'pubchem_cid')
       missing_cols <- required_db_cols[!required_db_cols %in% names(name_db)]
       if (length(missing_cols) > 0) {
         warning(sprintf("Local database is missing required columns: %s", paste(missing_cols, collapse=", ")))
@@ -493,94 +527,32 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
       
       name_map_df_merged_db <- merge(name_map_df,
                                      # Select only necessary columns to avoid potential type conflicts or large merges
-                                     name_db[, c('cleaned_Metabolite_name_lc', 'pubchem_cid', 'inchikey', 'smiles')],
+                                     name_db[, c('cleaned_Metabolite_name_lc', 'pubchem_cid')],
                                      by.x = 'clean_name',
                                      by.y = 'cleaned_Metabolite_name_lc',
                                      all.x = TRUE) # Keep the input row even if no match in local DB
     }
     
-    # --- Step 2a (NEW): Search by InChIKey/SMILES if CID is NA after merge ---
-    # This logic assumes the function processes one compound_name at a time,
-    # so name_map_df_merged_db should have only one row.
-    retrieved_cid <- NA # Variable to store CID found in this step
-    
-    cid_na_list <- which(is.na(name_map_df_merged_db$pubchem_cid))
-    
-    for (i in cid_na_list) {
-      current_inchikey <- name_map_df_merged_db$inchikey[i]
-      current_smiles <- name_map_df_merged_db$smiles[i]
-      
-      # Priority 1: Search by InChIKey
-      if (!is.na(current_inchikey) && nzchar(trimws(current_inchikey))) {
-        if (verbose) log_message(sprintf("Local CID is NA. Trying search by InChIKey: %s", current_inchikey))
-        search_url_inchikey <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchikey/%s/cids/JSON",
-                                       utils::URLencode(trimws(current_inchikey), reserved = TRUE))
-        response_inchikey <- retry_GET(search_url_inchikey, max_attempts = 2, wait_time = 0.1)
-        
-        if (!is.null(response_inchikey) && httr::status_code(response_inchikey) == 200) {
-          tryCatch({
-            cids_data <- jsonlite::fromJSON(rawToChar(response_inchikey$content))
-            if (!is.null(cids_data$IdentifierList$CID) && length(cids_data$IdentifierList$CID) > 0) {
-              retrieved_cid <- as.character(cids_data$IdentifierList$CID[1]) # Take the first CID
-              name_map_df_merged_db$pubchem_cid[i] <- retrieved_cid # Update the df
-              if (verbose) log_message(sprintf("Found CID %s using InChIKey %s", retrieved_cid, current_inchikey))
-            } else {
-              if (verbose) log_message(sprintf("InChIKey %s search returned no CIDs.", current_inchikey), tag = "INFO")
-            }
-          }, error = function(e) {
-            if (verbose) log_message(sprintf("Error parsing InChIKey search result for %s: %s", current_inchikey, e$message), tag = "WARNING")
-          })
-        } else {
-          if (verbose) log_message(sprintf("InChIKey search failed for %s (Status: %s)", current_inchikey, httr::status_code(response_inchikey %||% list(status_code = "NA"))), tag = "WARNING")
-        }
-      }
-      
-      # Priority 2: Search by SMILES (only if InChIKey didn't yield a CID)
-      if (is.na(retrieved_cid) && !is.na(current_smiles) && nzchar(trimws(current_smiles))) {
-        if (verbose) log_message(sprintf("Local CID is NA and InChIKey search failed/NA. Trying search by SMILES: %s", current_smiles))
-        search_url_smiles <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/%s/cids/JSON",
-                                     utils::URLencode(trimws(current_smiles), reserved = TRUE)) # SMILES needs URL encoding
-        response_smiles <- retry_GET(search_url_smiles, max_attempts = 2, wait_time = 0.1)
-        
-        if (!is.null(response_smiles) && httr::status_code(response_smiles) == 200) {
-          tryCatch({
-            cids_data <- jsonlite::fromJSON(rawToChar(response_smiles$content))
-            if (!is.null(cids_data$IdentifierList$CID) && length(cids_data$IdentifierList$CID) > 0) {
-              retrieved_cid <- as.character(cids_data$IdentifierList$CID[1]) # Take the first CID
-              name_map_df_merged_db$pubchem_cid[1] <- retrieved_cid # Update the df
-              if (verbose) log_message(sprintf("Found CID %s using SMILES %s", retrieved_cid, substr(current_smiles, 1, 50))) # Log truncated SMILES
-            } else {
-              if (verbose) log_message(sprintf("SMILES search returned no CIDs for: %s", substr(current_smiles, 1, 50)), tag = "INFO")
-            }
-          }, error = function(e) {
-            if (verbose) log_message(sprintf("Error parsing SMILES search result for %s: %s", substr(current_smiles, 1, 50), e$message), tag = "WARNING")
-          })
-        } else {
-          if (verbose) log_message(sprintf("SMILES search failed for %s (Status: %s)", substr(current_smiles, 1, 50), httr::status_code(response_smiles %||% list(status_code = "NA"))), tag = "WARNING")
-        }
-      }
-    } # End of check for missing CID and attempt to find via InChIKey/SMILES
-    
-    
     # --- Step 2b/2c (NEW): Fetch properties if CID is now known ---
     # Check the potentially updated pubchem_cid in the data frame
     cid_get_property_list <- name_map_df_merged_db$pubchem_cid[which(!is.na(name_map_df_merged_db$pubchem_cid))]
+    total_num <- nrow(name_map_df_merged_db)
+    log_message('local database matched num:',length(cid_get_property_list),'/',total_num)
     
     get_property_use_cid <- function(m) {
-      if (verbose) log_message(sprintf("Found/Confirmed CID: %s. Fetching properties directly.", m))
       final_cid = m
-      current_query_compoundname <- name_map_df_merged_db[which(name_map_df_merged_db$pubchem_cid == final_cid),'compound_name']
+      current_query_compoundname <- name_map_df_merged_db[which(name_map_df_merged_db$pubchem_cid == final_cid),'compound_name'][1]
       
       info_url <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/%s/property/IUPACName,MolecularFormula,MolecularWeight,CanonicalSMILES,IsomericSMILES,InChI,InChIKey/JSON",
                           final_cid)
-      info_response <- retry_GET(info_url, max_attempts = 2, wait_time = 0.1)
+      info_response <- retry_GET(info_url, max_attempts = 2, wait_time = 0.2)
       
-      if (!is.null(info_response) && httr::status_code(info_response) == 200) {
+      status_code <- if (!is.null(info_response)) httr::status_code(info_response) else NA
+      if (!is.null(info_response) && status_code == 200) {
         tryCatch({
           compound_data <- jsonlite::fromJSON(rawToChar(info_response$content))$PropertyTable$Properties
+          compound_data <- as.data.frame(compound_data, stringsAsFactors = FALSE)
           if (!is.null(compound_data) && nrow(compound_data) > 0) {
-            compound_data <- as.data.frame(compound_data, stringsAsFactors = FALSE)
-            
             # Ensure all required columns exist
             required_cols <- c("CID", "IUPACName", "MolecularFormula", "MolecularWeight", "CanonicalSMILES", "IsomericSMILES", "InChI", "InChIKey")
             for (col in required_cols) {
@@ -591,7 +563,6 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
             
             # Get database link information
             db_links <- get_kegg_id(as.numeric(compound_data$CID)) # Assuming get_kegg_id can handle numeric CID
-            
             # Coalesce function helper (pick first non-NA)
             coalesce_na <- function(...) {
               valid_args <- Filter(function(y) {
@@ -610,6 +581,7 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
             compound_data$HMDB_ID  <- coalesce_na(db_links$HMDB)
             compound_data$CHEBI_ID <- coalesce_na(db_links$CHEBI)
             compound_data$CTD      <- coalesce_na(db_links$CTD)
+            compound_data$MolecularWeight <- as.numeric(compound_data$MolecularWeight)
             
             # Add search name and similarity (indicate source)
             compound_data$SearchName <- current_query_compoundname
@@ -618,205 +590,282 @@ process_compounds <- function(compounds, process_dir, clear_cache = TRUE, n_core
             compound_data$CID <- as.character(compound_data$CID)
             
             # Select and order columns - ensure consistency
-            final_cols <- c("CID", "MolecularFormula", "MolecularWeight", "CanonicalSMILES", "IsomericSMILES", "InChI", "InChIKey",
-                            "IUPACName", "KEGG_ID", "HMDB_ID", "CHEBI_ID", "CTD", "SearchName", "Similarity")
             # Add missing columns if any (shouldn't happen with check above, but safety)
             for(fcol in final_cols) { if(!fcol %in% names(compound_data)) compound_data[[fcol]] <- NA }
-            
             return(compound_data[, final_cols, drop = FALSE]) # Return the dataframe
           } else {
-            if (verbose) log_message(sprintf("Could not retrieve properties for CID %s, although CID was found.", final_cid), tag = "WARNING")
+            log_message(sprintf("Could not retrieve properties for CID %s, although CID was found.", final_cid), tag = "WARNING")
           }
         }, error = function(e) {
-          if (verbose) log_message(sprintf("Error processing properties for CID %s: %s", final_cid, e$message), tag = "WARNING")
+          log_message(sprintf("Error processing properties for CID %s: %s", final_cid, e$message), tag = "WARNING")
         })
       } else {
-        if (verbose) log_message(sprintf("Failed to get info for CID: %s (Status: %s)", final_cid, httr::status_code(info_response %||% list(status_code="NA"))), tag = "WARNING")
+        log_message(sprintf("Failed to get info for CID: %s (Status: %s)", final_cid, status_code), tag = "WARNING")
       }
       # If fetching properties failed even with CID, fall through to name search? Or return NULL?
       # Current logic falls through, but perhaps returning NULL is better if CID was known but properties failed.
       # Let's add a return NULL here if properties fail for a known CID.
       log_message(sprintf("Failed to retrieve properties for known CID %s. No result returned.", final_cid), tag = "WARNING")
-      return(NULL)
+      log_message('status_code is ', status_code)
+
+      return(empty_compound_df)
     }
     
-    mapped_db_res <- plyr::ldply(cid_get_property_list, get_property_use_cid)
+    library(purrr)
+    library(furrr)
+
+    plan(multisession, workers = 4)
+    mapped_db_res <- furrr::future_map_dfr(
+                                cid_get_property_list,        
+                                get_property_use_cid,         
+                                .id = "id",                   
+                                .progress = TRUE,             
+                                .options = furrr::furrr_options(seed = TRUE)
+                              )
+    plan(sequential) # Reset to sequential after use
     
     need_pubchem_query_name_list <- name_map_df_merged_db$compound_name[which(is.na(name_map_df_merged_db$pubchem_cid))]
     
     return(list(mapped_db_res = mapped_db_res,
                 need_pubchem_query_name_list = need_pubchem_query_name_list))
   }
+  step_1_results <- tryCatch(
+    {
+      match_with_backgroud_db(name_list_unique)
+    },
+    error = function(e) {
+      # log_message("Step1 background database matching failed.", tag = "ERROR")
+      # log_message(sprintf("Error message: %s", conditionMessage(e)), tag = "ERROR")
+      # call_stack <- sys.calls()
+      # if (length(call_stack) > 0) {
+      #   stack_lines <- vapply(
+      #     seq_along(call_stack),
+      #     function(i) paste0(i, ": ", paste(deparse(call_stack[[i]]), collapse = "")),
+      #     character(1)
+      #   )
+      #   log_message(paste(c("Call stack:", stack_lines), collapse = "\n"), tag = "ERROR")
+      # }
+      # stop(conditionMessage(e), call. = FALSE)
+    }
+  )
   
-
-  step_1_results = lapply(name_list_unique,match_with_backgroud_db)
-  all_mapped_dfs <- lapply(step_1_results, `[[`, "mapped_db_res")
-  step1_mapped_db_res <- dplyr::bind_rows(all_mapped_dfs)
+  step1_mapped_db_res <- step_1_results$mapped_db_res
   
   
-  names_for_step2 <- unlist(lapply(step_1_results, `[[`, "need_pubchem_query_name_list"), use.names = FALSE)
-  
+  names_for_step2 <- unlist(step_1_results$need_pubchem_query_name_list, use.names = FALSE)
+  saveRDS(names_for_step2,file.path(APP_PATHS$process,'names_for_step2.rds'))
   target_cols <- c("SearchName", "CID", "IUPACName", "MolecularFormula",
                    "MolecularWeight", "KEGG_ID", "HMDB_ID", "CHEBI_ID",
                    "CTD", "Similarity")
-  split_by_searchname <- split(step1_mapped_db_res, step1_mapped_db_res$SearchName)
-  step1_results <- lapply(split_by_searchname, function(sub_df) {
-    
-    # Select only the target columns
-    # Use drop = FALSE to ensure it remains a data frame even if only one row/col
-    processed_df <- sub_df[, target_cols, drop = FALSE]
-    
-    # Convert column types to match the target 'results' structure
-    # Use suppressWarnings for potential NAs introduced by coercion if CID is not numeric
-    processed_df$CID <- suppressWarnings(as.integer(processed_df$CID))
-    processed_df$MolecularWeight <- suppressWarnings(as.numeric(processed_df$MolecularWeight))
-    # Similarity is already numeric in the example, but good practice to ensure
-    processed_df$Similarity <- as.numeric(processed_df$Similarity) 
-    
-    # Create the final list structure for this SearchName
-    list(
-      all_results = processed_df,
-      top_results = processed_df # Identical content as requested
-    )
-  })
+  
+  # 生成目标结构：命名用 SearchName，内容为同一行的剩余列
+  step1_results <- setNames(
+    lapply(seq_len(nrow(step1_mapped_db_res)), function(i) {
+      row_df <- step1_mapped_db_res[i, target_cols, drop = FALSE]
+      list(
+        all_results = row_df,
+        top_results = row_df
+      )
+    }),
+    make.unique(as.character(step1_mapped_db_res$SearchName))  # 如有重复名自动去重
+  )
+  
   log_message('Step1: Complete...')
 
   # 变量保存并行处理结果
   step2_results <- NULL
+
+  # Step 1.5 - PubChem CGI lookup for unresolved compounds
+  step1_5_results <- list()
+  names_for_step3 <- names_for_step2
+  saveRDS(names_for_step3,file.path(APP_PATHS$process,'names_for_step3.rds'))
   
-  # Check and load required parallel processing packages
-  if (!requireNamespace("parallel", quietly = TRUE)) {
-    log_message("Package 'parallel' is required for parallel processing. Using sequential processing instead.", 
-                tag = "WARNING")
-    step2_results <- process_until_complete(names_for_step2, cache_dir = cache_dir, verbose = verbose)
-  } else {
-    # Set up parallel processing
-    if (n_cores > 1) {
-      log_message(sprintf("Setting up parallel processing with %d cores", n_cores))
+  get_property_use_cid_cgi <- function(m) {
+      final_cid = m
+      current_query_compoundname <- cgi_df[which(cgi_df$CID == final_cid),'Names'][1]
       
-      # 创建一个新的作用域来处理集群并确保正确关闭
-      tryCatch({
-        cl <- parallel::makeCluster(n_cores)
-        on.exit({
-          if(exists("cl") && inherits(cl, "cluster")) {
-            tryCatch({
-              parallel::stopCluster(cl)
-            }, error = function(e) {
-              # 记录错误但不中断
-              log_message(sprintf("Error stopping cluster: %s", e$message), tag = "WARNING")
-            })
-          }
-        }, add = TRUE)
-        
-        # 将必要的包加载到每个工作进程
-        parallel::clusterEvalQ(cl, {
-          library(dplyr)
-          library(httr)
-          library(jsonlite)
-        })
-        
-        # 直接将所有需要的函数和变量导出到集群
-        # 这避免了依赖于包的加载
-        function_list <- c(
-          "search_compounds", "process_results", "retry_GET", "get_kegg_id", 
-          "string_similarity", "log_message", "clean_cache"
-        )
-        
-        # 获取当前环境中的函数定义
-        functions_env <- new.env()
-        for (fn in function_list) {
-          if (exists(fn, envir = .GlobalEnv)) {
-            functions_env[[fn]] <- get(fn, envir = .GlobalEnv)
-          } else if (exists(fn, envir = environment())) {
-            functions_env[[fn]] <- get(fn, envir = environment())
-          }
-        }
-        
-        # 导出函数和必要的全局变量
-        parallel::clusterExport(cl, c(names(functions_env), "cache_dir", "APP_PATHS", "verbose"), 
-                          envir = environment())
-        
-        # 处理化合物
-        log_message("Processing compounds in parallel...")
-        
-        # 使用并行lapply处理每个化合物
-        parallel_results <- parallel::parLapply(cl, names_for_step2, function(compound) {
-          tryCatch({
-            # 在每个并行工作进程中创建必要的目录
-            if (!dir.exists(cache_dir)) {
-              dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+      info_url <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/%s/property/IUPACName,MolecularFormula,MolecularWeight,CanonicalSMILES,IsomericSMILES,InChI,InChIKey/JSON",
+                          final_cid)
+      info_response <- retry_GET(info_url, max_attempts = 2, wait_time = 0.2)
+      
+      status_code <- if (!is.null(info_response)) httr::status_code(info_response) else NA
+      if (!is.null(info_response) && status_code == 200) {
+        tryCatch({
+          compound_data <- jsonlite::fromJSON(rawToChar(info_response$content))$PropertyTable$Properties
+          compound_data <- as.data.frame(compound_data, stringsAsFactors = FALSE)
+          if (!is.null(compound_data) && nrow(compound_data) > 0) {
+            # Ensure all required columns exist
+            required_cols <- c("CID", "IUPACName", "MolecularFormula", "MolecularWeight", "CanonicalSMILES", "IsomericSMILES", "InChI", "InChIKey")
+            for (col in required_cols) {
+              if (!(col %in% names(compound_data))) {
+                compound_data[[col]] <- NA
+              }
             }
             
-            # 搜索化合物
-            result <- search_compounds(compound, verbose = verbose)
-            if (!is.null(result)) {
-              # 处理结果
-              processed <- process_results(result, target = compound, verbose = verbose)
+            # Get database link information
+            db_links <- get_kegg_id(as.numeric(compound_data$CID)) # Assuming get_kegg_id can handle numeric CID
+            # Coalesce function helper (pick first non-NA)
+            coalesce_na <- function(...) {
+              valid_args <- Filter(function(y) {
+                !is.null(y) && length(y) > 0 && !is.na(y[1]) && y[1] != ""
+              }, list(...))
               
-              # 保存到缓存 - 直接保存processed而不添加额外嵌套
-              if (!is.null(processed)) {
-                result_path <- file.path(cache_dir, paste0(make.names(compound), ".rds"))
-                saveRDS(processed, result_path)
+              if (length(valid_args) > 0) {
+                # Return the first element of the first valid argument found
+                return(valid_args[[1]][1])
+              } else {
+                return('Not_Access')
               }
-              
-              # 直接返回processed，不添加额外嵌套
-              return(processed)
-            } else {
-              return(NULL)
             }
-          }, error = function(e) {
-            # 记录错误但不中断进程
-            return(list(error = e$message))
-          })
+            compound_data$MolecularWeight <- as.numeric(compound_data$MolecularWeight)
+            compound_data$KEGG_ID  <- coalesce_na(db_links$KEGG)
+            compound_data$HMDB_ID  <- coalesce_na(db_links$HMDB)
+            compound_data$CHEBI_ID <- coalesce_na(db_links$CHEBI)
+            compound_data$CTD      <- coalesce_na(db_links$CTD)
+            
+            # Add search name and similarity (indicate source)
+            compound_data$SearchName <- current_query_compoundname
+            compound_data$Similarity <- 1
+            # Ensure CID is character type like in other parts
+            compound_data$CID <- as.character(compound_data$CID)
+            
+            # Select and order columns - ensure consistency
+            # Add missing columns if any (shouldn't happen with check above, but safety)
+            for(fcol in final_cols) { if(!fcol %in% names(compound_data)) compound_data[[fcol]] <- NA }
+            return(compound_data[, final_cols, drop = FALSE]) # Return the dataframe
+          } else {
+            log_message(sprintf("Could not retrieve properties for CID %s, although CID was found.", final_cid), tag = "WARNING")
+          }
+        }, error = function(e) {
+          log_message(sprintf("Error processing properties for CID %s: %s", final_cid, e$message), tag = "WARNING")
         })
-        
-        # 先记录结果处理完成，再关闭集群
-        log_message("Parallel processing complete")
-        
-        # 给结果命名
-        names(parallel_results) <- names_for_step2
-        
-        # 过滤掉NULL结果和有错误的结果
-        step2_results <- parallel_results[!sapply(parallel_results, function(x) {
-          is.null(x) || !is.null(x$error)
-        })]
-        
-      }, error = function(e) {
-        log_message(sprintf("Error in parallel processing: %s", e$message), tag = "ERROR")
-        # 如果并行处理失败，回退到顺序处理
-        step2_results <- process_until_complete(names_for_step2, cache_dir = cache_dir, verbose = verbose)
-      })
-    } else {
-      # 如果n_cores <= 1，使用顺序处理
-      log_message("Using sequential processing (n_cores <= 1)")
-      step2_results <- process_until_complete(names_for_step2, cache_dir = cache_dir, verbose = verbose)
+      } else {
+        log_message(sprintf("Failed to get info for CID: %s (Status: %s)", final_cid, status_code), tag = "WARNING")
+      }
+      # If fetching properties failed even with CID, fall through to name search? Or return NULL?
+      # Current logic falls through, but perhaps returning NULL is better if CID was known but properties failed.
+      # Let's add a return NULL here if properties fail for a known CID.
+      log_message(sprintf("Failed to retrieve properties for known CID %s. No result returned.", final_cid), tag = "WARNING")
+      log_message('status_code is ', status_code)
+      return(empty_compound_df)
     }
+
+  if (length(names_for_step2) > 0) {
+    log_message("Step2: Attempting PubChem CGI lookup for unresolved compounds...")
+    cgi_lookup <- tryCatch(
+      process_synonyms_batch(names_for_step2),
+      error = function(e) {
+        log_message(sprintf("PubChem CGI lookup failed: %s", e$message), tag = "WARNING")
+        list()
+      }
+    )
+    saveRDS(cgi_lookup,file.path(APP_PATHS$process,'cgi_lookup.rds'))
+
+    if (length(cgi_lookup) > 0) {
+      cgi_df <- cgi_lookup
+      cgi_cids_list <- unique(na.omit(cgi_df$CID))
+      plan(multisession, workers = 4)
+      cgi_property_res <- furrr::future_map_dfr(
+                                  cgi_cids_list,        
+                                  get_property_use_cid_cgi,         
+                                  .id = "id",                   
+                                  .progress = TRUE,             
+                                  .options = furrr::furrr_options(seed = TRUE)
+                                )
+      plan(sequential) # Reset to sequential after use
+      
+      cgi_df_noNA <- cgi_df |> na.omit()
+      cgi_df_noNA <- merge(cgi_df_noNA,cgi_property_res,by = 'CID',all.x = T) |> 
+        # dplyr::rename(CID = cid) |> 
+        dplyr::select(names(cgi_property_res))
+      
+      
+      names_for_step3 <- cgi_df$Names[which(is.na(cgi_df$CID))]
+      
+      cols_keep <- c("SearchName",'CID',"IUPACName","MolecularFormula",
+                     "MolecularWeight","KEGG_ID","HMDB_ID","CHEBI_ID","CID","Similarity")
+      
+      # 生成目标结构：命名用 SearchName，内容为同一行的剩余列
+      cgi_res_list <- setNames(
+        lapply(seq_len(nrow(cgi_df_noNA)), function(i) {
+          row_df <- cgi_df_noNA[i, cols_keep, drop = FALSE]
+          list(
+            all_results = row_df,
+            top_results = row_df
+          )
+        }),
+        make.unique(as.character(cgi_df_noNA$SearchName))  # 如有重复名自动去重
+      )
+    
+    log_message('Step cgi search Complete...')
+    step1_step2_results <- c(step1_results, cgi_res_list)
+    } else {
+      log_message("PubChem CGI returned no matches for unresolved compounds", tag = "WARNING")
+    }
+  } else {
+    names_for_step3 <- character()
   }
+  log_message("after local search and cgi search, matched: ",length(step1_step2_results),'/',length(name_list_unique))
   
-  results <- c(step1_results,step2_results)
+  if(length(names_for_step3)>0){
+    # step3_results <- process_until_complete(names_for_step3, cache_dir = cache_dir)
+    
+    
+    plan(multisession, workers = 4)
+    api_search_res <- furrr::future_map(
+      names_for_step3,        
+      search_compounds,         
+      # .id = "id",                   
+      .progress = TRUE,             
+      .options = furrr::furrr_options(seed = TRUE)
+    )
+    plan(sequential) # Reset to sequential after use
+    names(api_search_res) <- names_for_step3
+    
+    api_step_results <- lapply(api_search_res, function(x) {
+      if (is.null(x) || (is.data.frame(x) && nrow(x) == 0)) {
+        # 保持空结果为 NULL（与原列表一致）
+        return(NULL)
+      }
+      # 非空则包装成目标结构：两个键且内容相同
+      list(
+        all_results = x,
+        top_results = x
+      )
+    })
+    
+    saveRDS(api_step_results,file.path(APP_PATHS$process,'Need_AI-assisted_data.rds'))
+    
+    log_message('Step3: Complete...')
+    results <- c(step1_step2_results,api_step_results)
+  }else{
+    log_message('Step3: skipped...')
+    results <- step1_step2_results
+  }
 
   # # 确保结果非空
   # if (is.null(results)) {
   #   log_message("No results obtained from processing, attempting sequential processing as fallback", tag = "WARNING")
   #   results <- process_until_complete(name_list_unique, cache_dir = cache_dir, verbose = verbose)
   # }
+  process_dir <- APP_PATHS$process
 
   if (!is.null(results) && length(results) > 0) {
-    results_file <- file.path(process_dir, "all_results.rds")
+    results_file <- file.path(process_dir, "step1_results.rds")
     saveRDS(results, results_file)
     log_message(sprintf("Original results saved to: %s", results_file))
 
     valid_results <- Filter(function(x) !is.null(x$all_results), results)
 
     if (length(valid_results) > 0) {
-      match_table <- create_match_status_table(valid_results)
+      # match_table <- create_match_status_table(valid_results)
+      match_table <- create_match_status_table(results)
       match_table_path <- file.path(process_dir, 'match_table.csv')
       write.csv(match_table, match_table_path, row.names = FALSE)
       log_message(sprintf("Match status table saved to: %s", match_table_path))
-
-      processed_results_file <- file.path(process_dir, 'processed_results.rds')
-      saveRDS(valid_results, processed_results_file)
-      log_message(sprintf("Processed results saved to: %s", processed_results_file))
+      # processed_results_file <- file.path(process_dir, 'processed_results.rds')
+      # saveRDS(valid_results, processed_results_file)
+      # log_message(sprintf("Processed results saved to: %s", processed_results_file))
     } else {
       log_message("No successfully processed compound results", tag = "WARNING")
     }
@@ -880,25 +929,92 @@ identify_compound <- function(compound_name, api_config, results, log_file) {
       prompt <- paste0(
         "Target compound X: ", compound_name, "; ",
         "Group A: ", paste(group_a_compounds, collapse = "||"), "; ",
-        "Please act as a chemical compound comparison expert. Your task is to carefully determine if target compound X matches any compound in Group A (separated by '||') based on your knowledge base. ",
-        "If there is a match, please only respond with the matched compound name from Group A (no need to explain the rules). ",
-        "If no match is found, respond with FALSE. ",
-        "For non-lipid compounds, the following cases should be considered the same compound: ",
-        "1) Suffixes \"-ate\" and \"acid\" are equivalent (e.g., \"Methylmalonate\" and \"Methylmalonic acid\"); ",
-        "2) Ignore naming variations (e.g., trans/E, allo/alpha, etc.); ",
-        "3) DL/D/L configurations are equivalent; ",
-        "4) Prefixes \"methyl\" or \"phosphoric acid\" are equivalent; ",
-        "5) \"alpha\" equals Greek letter alpha, \"beta\" equals Greek letter beta, \"gamma\" equals Greek letter gamma, but distinguish alpha/beta/gamma forms!; ",
-        "6) Tautomers are equivalent; ",
-        "7) Resonance structures are equivalent; ",
-        "8) Hydrates or solvates are equivalent (e.g., CuSO4 and CuSO4_5H2O); ",
-        "9) Different ionization states are equivalent; ",
-        "10) Different salt forms are equivalent (e.g., sodium and potassium salts); ",
-        "11) Isotope variants are equivalent (unless specified); ",
-        "20) Inorganic and organic forms of the same compound are equivalent. ",
-        "For lipid compounds, carefully check structural differences. For example, LPC(13:0) and LPC 18:1 should be considered different compounds due to different carbon chain lengths and saturation. ",
-        "Always carefully compare oxidation states and structural positions! ",
-        "Prostaglandin compounds (e.g., PGE2, PGD2) should be strictly distinguished based on their core structure and functional groups!"
+        "You are an expert in “compound name matching/deduplication.” Given a target compound X and a candidate set Group A (separated by ||), determine whether X represents the same compound as any item in Group A. If there is a match, output only the exact original name from Group A (just 1 item); if there is no match, output FALSE. No explanations, punctuation, quotation marks, or code blocks are allowed.
+
+        1. Input specifications and preprocessing (for comparison only; the output must preserve the original candidate)
+        
+        Splitting & cleaning: Split Group A by || → trim leading/trailing whitespace → remove zero-width characters (ZWSP/ZWNBSP/ZWJ/ZWNJ/BOM) → discard empty entries.
+        
+        Unicode normalization: Convert the versions of X and each candidate used for comparison to NFC; normalize all types of dashes/minus signs (–—− etc.) to -; convert full-width to half-width characters.
+        
+        Character equivalence table: Greek letters and their spelled-out equivalents are interchangeable (α/alpha, β/beta, …); cis/trans ↔ Z/E standardized by meaning; R/S, D/L/DL standardized.
+        
+        Ambiguous “D” handling:
+        
+        Treat as deuterium isotope only when explicit patterns appear: [dX], -dX, ^2H, U-^2H;
+        D-/L- in names like D-glucose, L-lactate are treated as chiral descriptors.
+        
+        Acid/salt/ionization/hydrate: Normalize descriptions (retain stoichiometry); metal complexation or coordination that changes the backbone/oxidation state is considered nonequivalent.
+        
+        2. Category determination (PG takes precedence over lipids)
+        
+        Match the following patterns in order (first hit defines the category; do not downgrade afterward):
+        
+        Prostaglandin PG class: ^(PG[DEFI]*|TX[A-B]*|prostacyclin|thromboxane) or common variants (e.g., TXA2/TXB2, PGI2 = prostacyclin).
+        
+        Lipids: Headgroup/abbreviation whitelist (FA/PC/PE/PI/PS/LPC/SM/TAG/DG/Cer/HexCer/GM…) or syntax like Headgroup(carbon_count:double_bonds).
+        
+        Other (non-lipid).
+        
+        3. Equivalence rules and priority
+           A. Non-lipids (relatively lenient)
+        
+        A1 Acid/conjugate base equivalence: -ic acid ↔ -ate.
+        
+        A2 Naming variants ignored: E/trans, allo/alpha, etc., but must not alter substitution position/oxidation state.
+        
+        A3 Chirality: When strict_chirality = FALSE, D/L/DL are equivalent; when TRUE, they must match.
+        
+        A4–A7: Tautomerism, solvation/hydration, ionization state, and salt forms are equivalent when strict_salt_equivalence = TRUE.
+        
+        A8 Isotopes: Equivalent by default; if either side has explicit isotope labeling ([dX], ^13C, U-^15N, …), they must match exactly.
+        
+        A10 Oxidation state/substitution position: Both must match strictly; differences render nonequivalence. Phosphate/phosphoric acid are handled under A1/A10 only if the backbone and substitution positions are unchanged.
+        
+        B. Lipids (strict, hierarchical)
+        
+        Definition of matching granularity:
+        
+        B0 Species-resolved: chains/positions/double-bond sites and Z/E, sn positions/linkage types (O-/P-), oxidation/hydroxyl/epoxy positions all specified.
+        
+        B1 Molecular-species: chain composition given but no sn; double-bond positions unknown.
+        
+        B2 Sum-composition: only total carbon count and unsaturation.
+        
+        Matching principles: Allow downgrading from finer to coarser granularity only if allow_lipid_downgrade = TRUE; otherwise only same-level matches. Any of the following differences makes them nonequivalent: headgroup type, number of chains, per-chain carbon count/unsaturation, double-bond positions/EZ, sn/linkage type (including Lyso, O-/P-), oxidation/hydroxyl/epoxy positions, and stereochemistry where required.
+        
+        Example: PC 34:1 ≡ PC 16:0_18:1 (B2 ↔ B1, requires allow_lipid_downgrade = TRUE); not equivalent to PE 34:1 or PC O-34:1.
+        
+        C. Prostaglandins (most strict)
+        
+        Subclass (PGE/PGD/PGF/PGI/TX) must match; α/β suffix strictly distinguished; backbone functional-group pattern must match; all oxidation/reduction/dehydroxy positions must match. Example: TXB2 ≠ TXA2; 11-dehydro-TXB2 is equivalent only to the identically named form.
+        
+        4. Isotopes and salt forms (unified ruling)
+        
+        isotope_must_match = CONDITIONAL: if explicit labeling is present, match exactly; otherwise ignore.
+        
+        strict_salt_equivalence = TRUE: different counterions (HCl, TFA, Na, K, Ca, NH4, …) and stoichiometries (mono-/di-sodium, etc.) are considered equivalent, provided the backbone/oxidation state/substitution positions are unchanged.
+        
+        5. Concurrent hits and tie-breaking
+        
+        If multiple candidates are equivalent:
+        
+        Finer granularity takes precedence (B0 > B1 > B2; PG and non-PG are not interchangeable);
+        
+        If granularity is the same, return the earliest item appearing in Group A.
+        
+        6. Output requirements (mandatory)
+        
+        Only two possibilities: on match → return that candidate’s original string (single line, original case/characters); on no match → FALSE.
+        
+        Output assertions: All must be satisfied, otherwise output FALSE:
+        
+        Single line, no leading/trailing whitespace, no zero-width characters, NFC;
+        
+        If not FALSE, its value must exactly equal one of the trimmed members from Group A;
+        
+        FALSE must be five ASCII uppercase letters.
+"
       )
     }
 
@@ -1076,7 +1192,7 @@ process_all_compounds <- function(cpd_names, api_config, results, process_dir,
   }
 
   # Ensure the results data is correctly loaded
-  results_file <- file.path(process_dir, 'all_results.rds')  # Use all_results.rds instead of processed_results.rds
+  results_file <- file.path(process_dir, 'step1_results.rds')  # Use step1_results.rds instead of processed_results.rds
   if (!file.exists(results_file)) {
     stop("Cannot find the processed results file: ", results_file)
   }
@@ -1087,21 +1203,21 @@ process_all_compounds <- function(cpd_names, api_config, results, process_dir,
     stop("Invalid or empty results data")
   }
 
-  # Check the results data structure
-  log_message("Checking result data structure...")
-  valid_results <- list()
-  for (name in names(results)) {
-    if (!is.null(results[[name]]$all_results)) {
-      valid_results[[name]] <- results[[name]]
-    }
-  }
-
-  if (length(valid_results) == 0) {
-    stop("No valid compound results data found")
-  }
-
-  log_message(sprintf("Found %d valid compound results", length(valid_results)))
-  results <- valid_results  # Use the validated results
+  # # Check the results data structure
+  # log_message("Checking result data structure...")
+  # valid_results <- list()
+  # for (name in names(results)) {
+  #   if (!is.null(results[[name]]$all_results)) {
+  #     valid_results[[name]] <- results[[name]]
+  #   }
+  # }
+  # 
+  # if (length(valid_results) == 0) {
+  #   stop("No valid compound results data found")
+  # }
+  # 
+  # log_message(sprintf("Found %d valid compound results", length(valid_results)))
+  # results <- valid_results  # Use the validated results
 
   # Process each compound
   processed_count <- 0
@@ -2851,110 +2967,110 @@ process_results <- function(results, target = "Prostaglandin E2 (PGE2)", thresho
     return(NULL)
   })
 }
-
-#' Process Compound List
-#'
-#' Process a list of compounds using AI identification with retry capability.
-#'
-#' @param compound_list Character vector of compound names to process
-#' @param cache_dir Character string specifying cache directory path
-#'
-#' @return List containing processed results for each compound
-#'
-#' @details
-#' Processes compounds in a list using AI identification with retry capability.
-#' Supports caching of intermediate results.
-#'
-#' @export
-process_compound_list <- function(compound_list, cache_dir = NULL) {
-  # Use the global defined cache directory
-  if (is.null(cache_dir)) {
-    cache_dir <- APP_PATHS$cache
-  }
-
-  # Create the cache directory (if it doesn't exist)
-  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-
-  # Cache file path
-  cache_file <- file.path(cache_dir, "results_cache.rds")
-  progress_file <- file.path(cache_dir, "progress.txt")
-
-  # Read the existing results
-  if (file.exists(cache_file)) {
-    all_results <- readRDS(cache_file)
-    cat("Loading existing results from cache...\n")
-  } else {
-    all_results <- list()
-  }
-
-  # Read the progress file
-  if (file.exists(progress_file)) {
-    # Use the same progress file reading method
-    progress_lines <- readLines(progress_file)
-    failed_compounds <- character(0)
-    completed_compounds <- character(0)
-
-    for (line in progress_lines) {
-      matches <- regmatches(line, regexec("^(.+):\\s*(\\w+)\\s*$", line))[[1]]
-      if (length(matches) == 3) {
-        compound <- trimws(matches[2])
-        status <- trimws(matches[3])
-        if (status == "Failed") {
-          failed_compounds <- c(failed_compounds, compound)
-        } else if (status == "Completed") {
-          completed_compounds <- c(completed_compounds, compound)
-        }
-      }
-    }
-
-    # Clean the failed items in the cache
-    all_results[failed_compounds] <- NULL
-
-    # Keep only the successfully completed results
-    all_results <- all_results[names(all_results) %in% completed_compounds]
-  }
-
-  # Clear the progress file
-  file.create(progress_file)
-
-  # Rewrite the completed records
-  if (length(all_results) > 0) {
-    for (compound in names(all_results)) {
-      cat(sprintf("%s: Completed\n", compound), file = progress_file, append = TRUE)
-    }
-  }
-
-  for (compound in compound_list) {
-    if (!is.null(all_results[[compound]])) {
-      cat(sprintf("Skipping %s (already processed successfully)\n", compound))
-      next
-    }
-
-    cat(sprintf("\nProcessing compound: %s\n", compound))
-    results <- search_compounds(compound)
-
-    if (!is.null(results)) {
-      processed <- process_results(results, target = compound)
-      if (!is.null(processed)) {
-        all_results[[compound]] <- processed
-
-        # Save the cache
-        saveRDS(all_results, cache_file)
-
-        # Update the progress file
-        cat(sprintf("%s: Completed\n", compound), file = progress_file, append = TRUE)
-      } else {
-        # Process results are NULL, record failure
-        cat(sprintf("%s: Failed\n", compound), file = progress_file, append = TRUE)
-      }
-    } else {
-      # Search results are NULL, record failure
-      cat(sprintf("%s: Failed\n", compound), file = progress_file, append = TRUE)
-    }
-  }
-
-  return(all_results)
-}
+#' 
+#' #' Process Compound List
+#' #'
+#' #' Process a list of compounds using AI identification with retry capability.
+#' #'
+#' #' @param compound_list Character vector of compound names to process
+#' #' @param cache_dir Character string specifying cache directory path
+#' #'
+#' #' @return List containing processed results for each compound
+#' #'
+#' #' @details
+#' #' Processes compounds in a list using AI identification with retry capability.
+#' #' Supports caching of intermediate results.
+#' #'
+#' #' @export
+#' process_compound_list <- function(compound_list, cache_dir = NULL) {
+#'   # Use the global defined cache directory
+#'   if (is.null(cache_dir)) {
+#'     cache_dir <- APP_PATHS$cache
+#'   }
+#' 
+#'   # Create the cache directory (if it doesn't exist)
+#'   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+#' 
+#'   # Cache file path
+#'   cache_file <- file.path(cache_dir, "results_cache.rds")
+#'   progress_file <- file.path(cache_dir, "progress.txt")
+#' 
+#'   # Read the existing results
+#'   if (file.exists(cache_file)) {
+#'     all_results <- readRDS(cache_file)
+#'     cat("Loading existing results from cache...\n")
+#'   } else {
+#'     all_results <- list()
+#'   }
+#' 
+#'   # Read the progress file
+#'   if (file.exists(progress_file)) {
+#'     # Use the same progress file reading method
+#'     progress_lines <- readLines(progress_file)
+#'     failed_compounds <- character(0)
+#'     completed_compounds <- character(0)
+#' 
+#'     for (line in progress_lines) {
+#'       matches <- regmatches(line, regexec("^(.+):\\s*(\\w+)\\s*$", line))[[1]]
+#'       if (length(matches) == 3) {
+#'         compound <- trimws(matches[2])
+#'         status <- trimws(matches[3])
+#'         if (status == "Failed") {
+#'           failed_compounds <- c(failed_compounds, compound)
+#'         } else if (status == "Completed") {
+#'           completed_compounds <- c(completed_compounds, compound)
+#'         }
+#'       }
+#'     }
+#' 
+#'     # Clean the failed items in the cache
+#'     all_results[failed_compounds] <- NULL
+#' 
+#'     # Keep only the successfully completed results
+#'     all_results <- all_results[names(all_results) %in% completed_compounds]
+#'   }
+#' 
+#'   # Clear the progress file
+#'   file.create(progress_file)
+#' 
+#'   # Rewrite the completed records
+#'   if (length(all_results) > 0) {
+#'     for (compound in names(all_results)) {
+#'       cat(sprintf("%s: Completed\n", compound), file = progress_file, append = TRUE)
+#'     }
+#'   }
+#' 
+#'   for (compound in compound_list) {
+#'     if (!is.null(all_results[[compound]])) {
+#'       cat(sprintf("Skipping %s (already processed successfully)\n", compound))
+#'       next
+#'     }
+#' 
+#'     cat(sprintf("\nProcessing compound: %s\n", compound))
+#'     results <- search_compounds(compound)
+#' 
+#'     if (!is.null(results)) {
+#'       processed <- process_results(results, target = compound)
+#'       if (!is.null(processed)) {
+#'         all_results[[compound]] <- processed
+#' 
+#'         # Save the cache
+#'         saveRDS(all_results, cache_file)
+#' 
+#'         # Update the progress file
+#'         cat(sprintf("%s: Completed\n", compound), file = progress_file, append = TRUE)
+#'       } else {
+#'         # Process results are NULL, record failure
+#'         cat(sprintf("%s: Failed\n", compound), file = progress_file, append = TRUE)
+#'       }
+#'     } else {
+#'       # Search results are NULL, record failure
+#'       cat(sprintf("%s: Failed\n", compound), file = progress_file, append = TRUE)
+#'     }
+#'   }
+#' 
+#'   return(all_results)
+#' }
 
 #' Check Processing Status
 #'
@@ -3080,115 +3196,81 @@ create_match_status_table <- function(all_results) {
 
   return(match_status)
 }
-
-#' Process Until Complete
-#'
-#' Process a list of compounds with multiple retry attempts until all compounds are either
-#' successfully processed or definitively failed.
-#'
-#' @param compound_list Character vector of compound names to process
-#' @param cache_dir Character string specifying cache directory path (default: "./data/cache")
-#' @param max_rounds Integer specifying maximum number of processing rounds (default: 3)
-#' @param verbose Logical flag indicating whether to output detailed progress messages. Defaults to FALSE.
-#'
-#' @return List containing processed results for all compounds
-#'
-#' @export
-process_until_complete <- function(compound_list, cache_dir = "./data/cache", max_rounds = 3, verbose = FALSE) {
-  total_compounds <- length(compound_list)
-  all_results <- list()  # Used to store all results
-
-  for (round in 1:max_rounds) {
-    log_message(sprintf("=== Round %d ===", round))
-
-    # Check the current status
-    status <- check_processing_status(compound_list, cache_dir, silent = TRUE)
-    remaining <- sum(status$status != "Completed")
-
-    if (remaining == 0) {
-      log_message("All compounds processed successfully!")
-      break
-    }
-
-    log_message(sprintf("Processing remaining compounds: %d/%d", remaining, length(compound_list)))
-    
-    # Only show detailed stats if verbose
-    if (verbose) {
-      log_message(sprintf("Processing status summary:"))
-      log_message(sprintf("Total compounds: %d", length(compound_list)))
-      log_message(sprintf("Completed: %d", sum(status$status == "Completed")))
-      log_message(sprintf("Failed: %d", sum(status$status == "Failed")))
-      log_message(sprintf("Not processed: %d", sum(status$status == "Not processed")))
-    }
-
-    # Process the compounds that are not completed
-    unfinished_compounds <- compound_list[status$status != "Completed"]
-    for (i in seq_along(unfinished_compounds)) {
-      compound <- unfinished_compounds[i]
-      
-      # Only log detailed progress if verbose
-      if (verbose) {
-        log_message(sprintf("Processing compound (%d/%d): %s",
-                      sum(status$status == "Completed") + i,
-                      total_compounds,
-                      compound))
-      } else if (i %% 5 == 0 || i == length(unfinished_compounds)) {
-        # Log progress less frequently when not verbose
-        log_message(sprintf("Progress: %d/%d compounds", i, length(unfinished_compounds)))
-      }
-      
-      tryCatch({
-        if (verbose) log_message(sprintf("Starting search for compound: %s", compound))
-        result <- search_compounds(compound, verbose = verbose)
-        if (!is.null(result)) {
-          if (verbose) log_message(sprintf("Search successful for compound: %s", compound))
-          # Save the results of a single compound
-          compound_result <- list(all_results = result)
-          result_path <- file.path(cache_dir, paste0(make.names(compound), ".rds"))
-          saveRDS(compound_result, result_path)
-          if (verbose) log_message(sprintf("Saved result to: %s", result_path))
-          # Add to the total results list
-          all_results[[compound]] <- compound_result
-        } else {
-          if (verbose) log_message(sprintf("No results found for compound: %s", compound), tag = "WARNING")
-        }
-      }, error = function(e) {
-        log_message(sprintf("Failed to process compound %s: %s", compound, e$message), tag = "ERROR")
-      })
-      
-      # Reduce sleep delay for faster processing
-      if (verbose) {
-        Sys.sleep(0.1)  # Give a little time for the UI to update when verbose
-      }
-    }
-
-    # Save the current results
-    results_cache_path <- file.path(cache_dir, "results_cache.rds")
-    saveRDS(all_results, results_cache_path)
-    log_message(sprintf("Saved all results to: %s", results_cache_path))
-
-    # If it is the last round, display the compounds that could not be processed
-    if (round == max_rounds) {
-      final_status <- check_processing_status(compound_list, cache_dir, silent = TRUE)
-      failed_compounds <- final_status$compound[final_status$status != "Completed"]
-      if (length(failed_compounds) > 0) {
-        log_message("The following compounds could not be processed:", tag = "WARNING")
-        # Only show the first 10 failed compounds to avoid excessive output
-        show_count <- min(10, length(failed_compounds))
-        for (i in 1:show_count) {
-          log_message(sprintf("- %s", failed_compounds[i]), tag = "WARNING")
-        }
-        if (length(failed_compounds) > show_count) {
-          log_message(sprintf("... and %d more", length(failed_compounds) - show_count), tag = "WARNING")
-        }
-      }
-    }
-  }
-
-  # Return all results
-  return(all_results)
-}
-
+#' 
+#' #' Process Until Complete
+#' #'
+#' #' Process a list of compounds with multiple retry attempts until all compounds are either
+#' #' successfully processed or definitively failed.
+#' #'
+#' #' @param compound_list Character vector of compound names to process
+#' #' @param cache_dir Character string specifying cache directory path (default: "./data/cache")
+#' #' @param max_rounds Integer specifying maximum number of processing rounds (default: 3)
+#' #' @param verbose Logical flag indicating whether to output detailed progress messages. Defaults to FALSE.
+#' #'
+#' #' @return List containing processed results for all compounds
+#' #'
+#' #' @export
+#' process_until_complete <- function(compound_list, cache_dir = "./data/cache", max_rounds = 3, verbose = FALSE) {
+#'   total_compounds <- length(compound_list)
+#'   all_results <- list()  # Used to store all results
+#' 
+#'   for (round in 1:max_rounds) {
+#'     log_message(sprintf("=== Round %d ===", round))
+#' 
+#'     # Check the current status
+#'     status <- check_processing_status(compound_list, cache_dir, silent = TRUE)
+#'     remaining <- sum(status$status != "Completed")
+#' 
+#'     if (remaining == 0) {
+#'       log_message("All compounds processed successfully!")
+#'       break
+#'     }
+#' 
+#'     log_message(sprintf("Processing remaining compounds: %d/%d", remaining, length(compound_list)))
+#'     
+#' 
+#'     # Process the compounds that are not completed
+#'     unfinished_compounds <- compound_list[status$status != "Completed"]
+#'     
+#'     plan(multisession, workers = 4)
+#'     api_search_res <- furrr::future_map(
+#'       unfinished_compounds,        
+#'       search_compounds,         
+#'       # .id = "id",                   
+#'       .progress = TRUE,             
+#'       .options = furrr::furrr_options(seed = TRUE)
+#'     )
+#'     plan(sequential) # Reset to sequential after use
+#'     
+#'     # stopifnot(length(api_search_res) == length(names_for_step3))
+#'     names(api_search_res) <- names_for_step3
+#'     # Save the current results
+#'     results_cache_path <- file.path(cache_dir, "results_cache.rds")
+#'     saveRDS(api_search_res, results_cache_path)
+#'     log_message(sprintf("Saved all results to: %s", results_cache_path))
+#' 
+#'     # If it is the last round, display the compounds that could not be processed
+#'     if (round == max_rounds) {
+#'       final_status <- check_processing_status(compound_list, cache_dir, silent = TRUE)
+#'       failed_compounds <- final_status$compound[final_status$status != "Completed"]
+#'       if (length(failed_compounds) > 0) {
+#'         log_message("The following compounds could not be processed:", tag = "WARNING")
+#'         # Only show the first 10 failed compounds to avoid excessive output
+#'         show_count <- min(10, length(failed_compounds))
+#'         for (i in 1:show_count) {
+#'           log_message(sprintf("- %s", failed_compounds[i]), tag = "WARNING")
+#'         }
+#'         if (length(failed_compounds) > show_count) {
+#'           log_message(sprintf("... and %d more", length(failed_compounds) - show_count), tag = "WARNING")
+#'         }
+#'       }
+#'     }
+#'   }
+#' 
+#'   # Return all results
+#'   return(api_search_res)
+#' }
+#' 
 
 
 #' Get KEGG ID
@@ -3681,4 +3763,447 @@ fst::write_fst(expanded_reactome_dat, file.path(reactome_dir, "reactome_chebi_ma
 reactome_update <- Sys.Date()
 saveRDS(reactome_update, file = file.path(reactome_dir, "reactome_lastest_update_time.rds"))
 log_message("Reactome data updated successfully.")
+}
+
+
+if (!requireNamespace("httr", quietly = TRUE)) {
+  stop("Package 'httr' is required. Install it with install.packages('httr').", call. = FALSE)
+}
+
+library(httr)
+
+create_exchange <- function() {
+  env <- new.env(parent = emptyenv())
+  env$base_url <- "https://pubchem.ncbi.nlm.nih.gov/idexchange/"
+  env$handle <- httr::handle(env$base_url)
+  env$user_agent <- httr::user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+  env$ssl_config <- httr::config(ssl_verifypeer = 0L, ssl_verifyhost = 0L)
+  env
+}
+
+
+submit_synonyms_for_cids <- function(exchange, synonyms) {
+  input_text <- paste0(trimws(synonyms[nzchar(trimws(synonyms))]), collapse = "\n")
+  
+  form_data <- list(
+    idstr = input_text,
+    idinput = "str",
+    inputtype = "synofiltered",
+    inputdsn = "",
+    operatortype = "samecid",
+    outputtype = "cid",
+    outputdsn = "",
+    method = "file-pair",
+    compression = "none",
+    submitjob = "Submit Job"
+  )
+  
+  message(sprintf("Submitting %d synonyms for CID lookup...", length(synonyms)))
+  
+  response <- tryCatch(
+    httr::POST(
+      url = paste0(exchange$base_url, "idexchange.cgi"),
+      handle = exchange$handle,
+      body = form_data,
+      encode = "form",
+      exchange$user_agent,
+      exchange$ssl_config,
+      httr::timeout(60)
+    ),
+    error = function(e) stop(sprintf("Request failed: %s", conditionMessage(e)))
+  )
+  
+  httr::stop_for_status(response)
+  content <- httr::content(response, as = "text", encoding = "UTF-8")
+  message(sprintf("Response status: %s", httr::status_code(response)))
+  message(sprintf("Response URL: %s", response$url %||% paste0(exchange$base_url, "idexchange.cgi")))
+  
+  if (is_direct_result(content)) {
+    message("Got direct CID results")
+    return(content)
+  }
+  
+  download_url <- extract_download_url(content, exchange$base_url)
+  if (!is.null(download_url)) {
+    message(sprintf("Found download URL: %s", download_url))
+    return(download_url)
+  }
+  
+  job_id <- extract_job_id(content)
+  if (!is.null(job_id)) {
+    message(sprintf("Job submitted with ID: %s", job_id))
+    return(wait_for_job(exchange, job_id))
+  }
+  
+  refresh_url <- extract_refresh_url(content, exchange$base_url)
+  if (!is.null(refresh_url)) {
+    message(sprintf("Following refresh URL: %s", refresh_url))
+    Sys.sleep(3)
+    return(follow_redirect(exchange, refresh_url))
+  }
+  
+  if (is_processing_page(content)) {
+    message("Job appears to be processing...")
+    max_retries <- 20
+    for (retry in seq_len(max_retries)) {
+      wait_time <- min(15, 4 + retry)
+      Sys.sleep(wait_time)
+      message(sprintf("Checking job status... (attempt %d/%d, waited %ds)", retry, max_retries, wait_time))
+      
+      check <- tryCatch(
+        httr::GET(
+          url = response$url %||% paste0(exchange$base_url, "idexchange.cgi"),
+          handle = exchange$handle,
+          exchange$user_agent,
+          exchange$ssl_config,
+          httr::timeout(60)
+        ),
+        error = function(e) {
+          message(sprintf("Request error during status check: %s", conditionMessage(e)))
+          NULL
+        }
+      )
+      
+      if (is.null(check)) next
+      
+      httr::stop_for_status(check)
+      check_content <- httr::content(check, as = "text", encoding = "UTF-8")
+      
+      if (is_direct_result(check_content)) {
+        message("Got direct results!")
+        return(check_content)
+      }
+      
+      download_url <- extract_download_url(check_content, exchange$base_url)
+      if (!is.null(download_url)) {
+        message(sprintf("Found download URL after waiting: %s", download_url))
+        return(download_url)
+      }
+      
+      if (grepl("completed|finished", check_content, ignore.case = TRUE)) {
+        content <- check_content
+        break
+      }
+      
+      if (!is_processing_page(check_content)) {
+        message("Job no longer shows processing status")
+        content <- check_content
+        break
+      }
+    }
+  }
+  
+  writeLines(content, con = "debug_response.html", useBytes = TRUE)
+  message("Checking for immediate results in response...")
+  if (nzchar(input_text) && grepl(substr(input_text, 1, min(10, nchar(input_text))), content, fixed = TRUE)) {
+    message("Found input synonyms in response - checking for results...")
+  }
+  
+  stop("Could not find job ID, download link, or direct results in response. Check debug_response.html")
+}
+
+is_direct_result <- function(content) {
+  if (!nzchar(content)) return(FALSE)
+  lines <- strsplit(content, "\\r?\\n")[[1]]
+  length(lines) > 1 && !grepl("<html|<body|<head", content, ignore.case = TRUE)
+}
+
+extract_download_url <- function(content, base_url) {
+  pattern <- 'href="([^"]*(?:\\.txt|\\.tsv|\\.csv|\\.dat)[^"]*)"'
+  match <- regexpr(pattern, content, perl = TRUE, ignore.case = TRUE)
+  if (match[1] == -1) return(NULL)
+  url <- regmatches(content, match)[1]
+  url <- sub('^href="', "", url)
+  url <- sub('"$', "", url)
+  if (!startsWith(url, "http")) {
+    url <- paste0(base_url, url)
+  }
+  url
+}
+
+extract_job_id <- function(content) {
+  pattern <- 'job[_\\s]*(?:id|number)["\\s]*[:=]["\\s]*([A-Za-z0-9_-]+)'
+  match <- regexpr(pattern, content, perl = TRUE, ignore.case = TRUE)
+  if (match[1] == -1) return(NULL)
+  sub(pattern, "\\1", regmatches(content, match)[[1]], perl = TRUE)
+}
+
+extract_refresh_url <- function(content, base_url) {
+  pattern <- '<meta[^>]*refresh[^>]*url=([^">]*)'
+  match <- regexpr(pattern, content, perl = TRUE, ignore.case = TRUE)
+  if (match[1] == -1) return(NULL)
+  url <- sub(pattern, "\\1", regmatches(content, match)[[1]], perl = TRUE)
+  if (!startsWith(url, "http")) {
+    url <- paste0(base_url, url)
+  }
+  url
+}
+
+is_processing_page <- function(content) {
+  grepl("processing|queued|running", content, ignore.case = TRUE)
+}
+
+follow_redirect <- function(exchange, url, max_redirects = 10) {
+  current_url <- url
+  for (i in seq_len(max_redirects)) {
+    response <- tryCatch(
+      httr::GET(
+        url = current_url,
+        handle = exchange$handle,
+        exchange$user_agent,
+        exchange$ssl_config,
+        httr::timeout(30)
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(response)) {
+      Sys.sleep(2)
+      next
+    }
+    
+    httr::stop_for_status(response)
+    content <- httr::content(response, as = "text", encoding = "UTF-8")
+    
+    if (is_direct_result(content)) return(content)
+    
+    download_url <- extract_download_url(content, exchange$base_url)
+    if (!is.null(download_url)) return(download_url)
+    
+    refresh_url <- extract_refresh_url(content, exchange$base_url)
+    if (is.null(refresh_url)) return(content)
+    
+    current_url <- refresh_url
+    Sys.sleep(2)
+  }
+  content
+}
+
+wait_for_job <- function(exchange, job_id, max_wait = 300) {
+  start_time <- Sys.time()
+  status_url <- paste0(exchange$base_url, "idexchange.cgi?job_id=", job_id)
+  
+  repeat {
+    if (as.numeric(difftime(Sys.time(), start_time, units = "secs")) > max_wait) {
+      stop(sprintf("Job %s did not complete within %d seconds", job_id, max_wait))
+    }
+    
+    response <- tryCatch(
+      httr::GET(
+        url = status_url,
+        handle = exchange$handle,
+        exchange$user_agent,
+        exchange$ssl_config,
+        httr::timeout(300)
+      ),
+      error = function(e) NULL
+    )
+    
+    if (is.null(response)) {
+      Sys.sleep(5)
+      next
+    }
+    
+    httr::stop_for_status(response)
+    content <- httr::content(response, as = "text", encoding = "UTF-8")
+    
+    download_url <- extract_download_url(content, exchange$base_url)
+    if (!is.null(download_url)) return(download_url)
+    
+    if (is_processing_page(content)) {
+      Sys.sleep(5)
+      next
+    }
+    
+    if (grepl("error|failed", content, ignore.case = TRUE)) {
+      stop("Job failed or encountered an error")
+    }
+    
+    if (grepl("cid", content, ignore.case = TRUE) && length(strsplit(content, "\\r?\\n")[[1]]) > 2) {
+      return(content)
+    }
+    
+    Sys.sleep(5)
+  }
+}
+
+download_results <- function(exchange, url_or_content) {
+  if (startsWith(url_or_content, "http")) {
+    response <- httr::GET(
+      url_or_content,
+      handle = exchange$handle,
+      exchange$user_agent,
+      exchange$ssl_config,
+      httr::timeout(30)
+    )
+    httr::stop_for_status(response)
+    httr::content(response, as = "text", encoding = "UTF-8")
+  } else {
+    url_or_content
+  }
+}
+
+get_cids_from_synonyms <- function(synonyms) {
+  exchange <- create_exchange()
+  result <- submit_synonyms_for_cids(exchange, synonyms)
+  download_results(exchange, result)
+}
+
+read_synonyms_from_file <- function(file_path) {
+  if (!file.exists(file_path)) {
+    stop(sprintf("Input file '%s' not found.", file_path))
+  }
+  lines <- readLines(file_path, warn = FALSE, encoding = "UTF-8")
+  lines <- trimws(lines)
+  lines[nzchar(lines)]
+}
+
+process_synonyms_batch <- function(synonyms, batch_size = 300, output_dir = APP_PATHS$process, prefix = "batch") {
+  results <- list()
+  exchange <- create_exchange()
+  
+  message(sprintf("Processing %d synonyms in batches of %d...", length(synonyms), batch_size))
+  
+  total_batches <- ceiling(length(synonyms) / batch_size)
+  for (i in seq(1, length(synonyms), by = batch_size)) {
+    batch <- synonyms[i:min(i + batch_size - 1, length(synonyms))]
+    batch_num <- ceiling(i / batch_size)
+    message(sprintf("Processing batch %d/%d (%d entries)...", batch_num, total_batches, length(batch)))
+    
+    max_retries <- 3
+    batch_success <- FALSE
+    
+    for (attempt in seq_len(max_retries)) {
+      if (attempt > 1) {
+        message(sprintf("Retrying batch %d, attempt %d/%d", batch_num, attempt, max_retries))
+        Sys.sleep(10)
+      }
+      
+      result <- tryCatch(
+        {
+          result_url <- submit_synonyms_for_cids(exchange, batch)
+          download_results(exchange, result_url)
+        },
+        error = function(e) {
+          message(sprintf("Error processing batch %d, attempt %d: %s", batch_num, attempt, conditionMessage(e)))
+          NULL
+        }
+      )
+      
+      if (is.null(result)) next
+      
+      if (!is.null(output_dir)) {
+        dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+        batch_file <- file.path(output_dir, sprintf("%s_%03d.txt", prefix, batch_num))
+        writeLines(result, batch_file, useBytes = TRUE)
+      }
+      
+      parsed <- read.delim(batch_file,header = F)
+      names(parsed) <- c('Names','CID')
+      parsed <- parsed |> dplyr::group_by(Names) |> dplyr::slice_head(n =1) |> dplyr::ungroup()
+      
+      results <- dplyr::bind_rows(parsed,results)
+      
+      message(sprintf("Batch %d completed successfully. Found %d results.", batch_num, sum(lengths(parsed))))
+      batch_success <- TRUE
+      break
+    }
+    
+    if (batch_success && (i + batch_size - 1) < length(synonyms)) {
+      message("Waiting 2 seconds before next batch...")
+      Sys.sleep(2)
+    }
+    
+    if (!batch_success) {
+      message(sprintf("Batch %d completely failed. Continuing with next batch...", batch_num))
+    }
+  }
+  
+  results
+}
+
+parse_results <- function(result_content) {
+  if (!nzchar(result_content)) return(list())
+  
+  con <- textConnection(result_content)
+  on.exit(close(con), add = TRUE)
+  
+  df <- tryCatch(
+    utils::read.table(con, sep = "\t", header = FALSE, quote = "", comment.char = "", stringsAsFactors = FALSE, fill = TRUE),
+    error = function(e) NULL
+  )
+  
+  if (is.null(df) || nrow(df) == 0 || ncol(df) < 2) return(list())
+  
+  df[[1]] <- trimws(as.character(df[[1]]))
+  df[[2]] <- trimws(as.character(df[[2]]))
+  
+  if (nrow(df) > 0 && tolower(df[[1]][1]) == "synonym" && tolower(df[[2]][1]) == "cid") {
+    df <- df[-1, , drop = FALSE]
+  }
+  
+  df <- df[nzchar(df[[1]]) & nzchar(df[[2]]), , drop = FALSE]
+  if (nrow(df) == 0) return(list())
+  
+  parsed <- list()
+  for (i in seq_len(nrow(df))) {
+    synonym <- df[[1]][i]
+    cid_tokens <- strsplit(df[[2]][i], "[;,]")[[1]]
+    cid_tokens <- trimws(cid_tokens)
+    cid_tokens <- cid_tokens[nzchar(cid_tokens)]
+    if (length(cid_tokens) == 0) next
+    parsed[[synonym]] <- unique(c(parsed[[synonym]], cid_tokens))
+  }
+  parsed
+}
+
+save_results_to_csv <- function(results, output_file) {
+  if (length(results) == 0) {
+    message("No results to save.")
+    return(invisible(NULL))
+  }
+  
+  synonyms <- sort(names(results))
+  cid_strings <- vapply(
+    synonyms,
+    function(s) paste(sort(unique(results[[s]])), collapse = ";"),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  
+  df <- data.frame(Synonym = synonyms, CIDs = cid_strings, stringsAsFactors = FALSE)
+  names(df)[2] <- "CID(s)"
+  utils::write.csv(df, file = output_file, row.names = FALSE, fileEncoding = "UTF-8")
+  message(sprintf("Results saved to %s", output_file))
+}
+
+load_existing_results <- function(output_file) {
+  if (!file.exists(output_file)) {
+    return(list())
+  }
+  
+  df <- tryCatch(
+    utils::read.csv(output_file, stringsAsFactors = FALSE, encoding = "UTF-8"),
+    error = function(e) {
+      message(sprintf("Error loading existing results: %s", conditionMessage(e)))
+      NULL
+    }
+  )
+  
+  if (is.null(df) || nrow(df) == 0) return(list())
+  
+  names(df) <- trimws(names(df))
+  syn_col <- which(tolower(names(df)) == "synonym")
+  cid_col <- which(grepl("cid", tolower(names(df))))
+  if (length(syn_col) == 0 || length(cid_col) == 0) return(list())
+  
+  results <- list()
+  for (i in seq_len(nrow(df))) {
+    synonym <- trimws(df[i, syn_col])
+    cids <- trimws(strsplit(df[i, cid_col], ";")[[1]])
+    cids <- cids[nzchar(cids)]
+    if (!nzchar(synonym) || length(cids) == 0) next
+    results[[synonym]] <- unique(cids)
+  }
+  message(sprintf("Loaded %d existing results from %s", length(results), output_file))
+  results
 }
