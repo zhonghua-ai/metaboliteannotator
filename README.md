@@ -6,6 +6,10 @@
 
 <img src="inst/www/roadmap.png" alt="MetaboliteAnnotator Workflow" width="1000" />
 
+<img src="inst/www/MTBLS_compare.png" alt="Performance and cost of MetaboliteAnnotator across MTBLS datasets." width="1000" />
+
+<img src="inst/www/compare.png" alt="Characteristic Compare of MetaboliteAnnotator with MetaboAnalyst and metaboliteIDmapping" width="1000" />
+
 ## Features
 - Real time database update
   - `Pubchem` real time API service
@@ -14,13 +18,13 @@
   - `KEGG` real time API service
 - Automated compound search and curation
 
-- AI-assisted identification
+- AI-assisted matching
   - support AI model: `GPT 4o-mini`, `deepseek-coder`...
   - Customized API key
 
-- Endogenous metabolites identification
-  - `HMDB` endogenous metabolites identification
-  - `mzcloud` endogenous metabolites identification 
+- Endogenous metabolites checking
+  - `HMDB` endogenous metabolites information
+  - `mzcloud` endogenous metabolites information
 
 - Real-time external dataset annotation
   - `KEGG` pathway enrichment analysis (81 metabolic pathways, 13 reaction pathways)
@@ -29,30 +33,7 @@
   
 
 ## How to Run
-
-1. **Requirements**:
-   - An R environment (recommended to run in `RStudio`).
-   - Required R packages: `shiny`, `shinyjs`, `shinycssloaders`, `ellmer`, `DT`, `dplyr`, `KEGGREST`, `ggplot2`, etc. 
-   - A valid API key is needed if the AI model is being used.
-
-2. **Installation and Configuration**:
-   - Clone or download the project ensuring the directory structure remains intact.
-   - Install the necessary R packages (listed in `requirements.R`) and files, the files include pubchem CID-Parent file and other files:
-     ```r
-     MetaboliteAnnotator::init_app('your_work_path')
-     ```
-    - This function will create a new directory in your working path, and automatically detect and update the necessary files (including pubchem CID-Parent file, ChEBI file, CTD database file,  etc.).
-   - **DO NOT change the directory structure of the project.**
-
-3. **Starting the Application**:
-     ```r
-     MetaboliteAnnotator::run_ui()
-     ```
-   - The application will open in your default web browser, you can use the app with a user-friendly interface.
-
-
-## How to find the results:
-- At the six step (`6. Report Download`), you will download a process report file, this file detaily record the process of the analysis.
+- See https://github.com/zhonghua-ai/user_manual/blob/main/user_manual.md
 
 ## Data sources:
 
