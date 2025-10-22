@@ -97,19 +97,19 @@ init_app <- function(work_path) {
     log_message(sprintf("Created directory: %s", pubchem_dir))
   }
   
-  cid_parent_file <- file.path(pubchem_dir, "CID-Parent.fst")
-  cid_parent_last_update_time <- file.path(pubchem_dir, "cid_parent_lastest_update_time.rds")
+  # cid_parent_file <- file.path(pubchem_dir, "CID-Parent.fst")
+  # cid_parent_last_update_time <- file.path(pubchem_dir, "cid_parent_lastest_update_time.rds")
   
-  if (!file.exists(cid_parent_file) || !file.exists(cid_parent_last_update_time)) {
-    update_pubchem_data()
-    log_message(sprintf('Updating Pubchem CID-Parent...'), tag = '[INFO]')
-  } else {
-    last_update <- readRDS(cid_parent_last_update_time)
-    if (difftime(Sys.Date(), last_update, units = "days") > 7) {
-      update_pubchem_data()
-      log_message(sprintf('Updating Pubchem CID-Parent...'), tag = '[INFO]')
-    }
-  }
+  # if (!file.exists(cid_parent_file) || !file.exists(cid_parent_last_update_time)) {
+  #   update_pubchem_data()
+  #   log_message(sprintf('Updating Pubchem CID-Parent...'), tag = '[INFO]')
+  # } else {
+  #   last_update <- readRDS(cid_parent_last_update_time)
+  #   if (difftime(Sys.Date(), last_update, units = "days") > 7) {
+  #     update_pubchem_data()
+  #     log_message(sprintf('Updating Pubchem CID-Parent...'), tag = '[INFO]')
+  #   }
+  # }
 
   ctd_dir <- file.path(APP_PATHS$data, "ctd_info")
   ctd_file <- file.path(ctd_dir, "chem-gene_data.fst")

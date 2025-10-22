@@ -1,6 +1,6 @@
 ---
-title: "MetFusionAnnotator Processed Report"
-author: "MetFusionAnnotator"
+title: "MetaboliteAnnotator Processed Report"
+author: "MetaboliteAnnotator"
 date: "`r Sys.Date()`"
 output: 
   word_document:
@@ -30,7 +30,7 @@ library(dplyr)
 
 # Introduction
 
-The MetFusionAnnotator application provides an efficient pipeline for metabolomics data processing. This report summarizes the processing steps, results, and performance metrics of your analysis.
+The MetaboliteAnnotator provides an efficient pipeline for metabolite name harmonization and functional annotation. This report summarizes the processing steps, results, and performance metrics of your analysis.
 
 
 # Processing Statistics
@@ -75,7 +75,7 @@ proc_rate <- if(params$total_compounds > 0) {
   * **Average processing rate: `r proc_rate` seconds per compound**
 
 - **AI Processing Performance**: 
-  * **Total AI identification time: `r params$step2_time`**
+  * **Total AI matching time: `r params$step2_time`**
   * **Provides enhanced accuracy for ambiguous compounds**
   
 
@@ -84,7 +84,7 @@ proc_rate <- if(params$total_compounds > 0) {
 Our pipeline consists of four main steps:
 
 ### 1. Automated Compound Search
-- **Purpose**: Initial identification and matching of input compounds
+- **Purpose**: Initial  matching of input compounds
 - **Method**: Automated database searching and name matching
 - **Output Location**: `r params$output_paths$process`
 - **Key Files**:
@@ -92,11 +92,11 @@ Our pipeline consists of four main steps:
   * `all_results.rds`: Detailed search results
 
 ### 2. AI-Assisted Identification
-- **Purpose**: Secondary identification for unmatched compounds
-- **Method**: Advanced AI models for compound name analysis
+- **Purpose**: Secondary matching for unmatched compounds
+- **Method**: Advanced AI models for compound name matching
 - **Output Files**:
-  * `AI_identified_cleaned_latest.csv`: Latest AI identification results
-  * `AI_identify_compound_name_*_log.txt`: Detailed identification logs
+  * `AI_identified_cleaned_latest.csv`: Latest AI matching results
+  * `AI_identify_compound_name_*_log.txt`: Detailed matching logs
 
 ### 3. Endogenous Verification
 - **Databases Used**:
@@ -111,11 +111,11 @@ Our pipeline consists of four main steps:
 - **Purpose**: Biological pathway enrichment analysis
 - **Databases**: KEGG, Reactome, CTD
 - **Output Files**: 
-  * `1.MetFusionAnnotator_Results_KEGG.csv` 
-  * `2.MetFusionAnnotator_Results_Gene.csv`
-  * `3.MetFusionAnnotator_Results_GO.csv`
-  * `4.MetFusionAnnotator_Results_Phenotype.csv`
-  * `5.MetFusionAnnotator_Results_Reactome.csv`
+  * `1.MetaboliteAnnotator_Results_KEGG.csv` 
+  * `2.MetaboliteAnnotator_Results_Gene.csv`
+  * `3.MetaboliteAnnotator_Results_GO.csv`
+  * `4.MetaboliteAnnotator_Results_Phenotype.csv`
+  * `5.MetaboliteAnnotator_Results_Reactome.csv`
 
 
 # File Organization
@@ -147,12 +147,12 @@ This report package includes several result files that provide comprehensive inf
 ```{r results-files-table}
 results_files_df <- data.frame(
   Filename = c(
-    "0.MetFusionAnnotator_Results.csv",
-    "1.MetFusionAnnotator_Results_KEGG.csv",
-    "2.MetFusionAnnotator_Results_Gene.csv",
-    "3.MetFusionAnnotator_Results_GO.csv", 
-    "4.MetFusionAnnotator_Results_Phenotype.csv",
-    "5.MetFusionAnnotator_Results_Reactome.csv"
+    "0.MetaboliteAnnotator_Results.csv",
+    "1.MetaboliteAnnotator_Results_KEGG.csv",
+    "2.MetaboliteAnnotator_Results_Gene.csv",
+    "3.MetaboliteAnnotator_Results_GO.csv", 
+    "4.MetaboliteAnnotator_Results_Phenotype.csv",
+    "5.MetaboliteAnnotator_Results_Reactome.csv"
   ),
   Description = c(
     "Main results file containing all identified compounds with their properties and IDs",
@@ -173,7 +173,7 @@ kable(results_files_df,
 
 ### Understanding the Files
 
-#### Main Results (0.MetFusionAnnotator_Results.csv)
+#### Main Results (0.MetaboliteAnnotator_Results.csv)
 This file contains comprehensive information about all processed compounds, including:
 - Original compound names
 - Matched compound names
@@ -182,34 +182,34 @@ This file contains comprehensive information about all processed compounds, incl
 - Endogenous status from both HMDB and mzCloud
 - Similarity scores between input and matched compounds
 
-#### KEGG Pathway Results (1.MetFusionAnnotator_Results_KEGG.csv)
+#### KEGG Pathway Results (1.MetaboliteAnnotator_Results_KEGG.csv)
 Contains KEGG pathway annotations for identified compounds, including:
 - Pathway IDs and names
 - Organism information
 - Pathway classes
 - Links to external KEGG resources
 
-#### Gene Interaction Results (2.MetFusionAnnotator_Results_Gene.csv)
+#### Gene Interaction Results (2.MetaboliteAnnotator_Results_Gene.csv)
 Provides information about gene interactions for identified compounds from the Comparative Toxicogenomics Database (CTD), including:
 - Gene symbols and names
 - Interaction types
 - Organism information
 - Supporting references
 
-#### Gene Ontology Results (3.MetFusionAnnotator_Results_GO.csv)
+#### Gene Ontology Results (3.MetaboliteAnnotator_Results_GO.csv)
 Contains Gene Ontology annotations organized by:
 - Biological Process (BP): biological activities involving multiple molecular functions
 - Cellular Component (CC): cellular locations where gene products function
 - Molecular Function (MF): molecular-level activities of gene products
 
-#### Phenotype Association Results (4.MetFusionAnnotator_Results_Phenotype.csv)
+#### Phenotype Association Results (4.MetaboliteAnnotator_Results_Phenotype.csv)
 Shows phenotype associations for identified compounds from CTD database:
 - Phenotype names and IDs
 - Interaction types
 - Organism information
 - Supporting evidence
 
-#### Reactome Pathway Results (5.MetFusionAnnotator_Results_Reactome.csv)
+#### Reactome Pathway Results (5.MetaboliteAnnotator_Results_Reactome.csv)
 Provides Reactome pathway annotations:
 - Pathway IDs and names
 - Reaction information
@@ -238,7 +238,7 @@ These intermediate files remain in your process directory for reference and can 
 
 2. **Enhanced Accuracy**
    - Multi-step verification process
-   - AI-assisted identification for ambiguous cases
+   - AI-assisted matching for ambiguous cases
 
 3. **Comprehensive Annotation**
    - Integration of multiple databases
@@ -249,7 +249,7 @@ These intermediate files remain in your process directory for reference and can 
    - Clear processing logs
    - Detailed statistical reports
 
-Thank you for using MetFusionAnnotator. We hope our solution brings efficiency and convenience to your research work!
+Thank you for using MetaboliteAnnotator. We hope our solution brings efficiency and convenience to your research work!
 
 ---
 *Report generated at `r Sys.time()`*

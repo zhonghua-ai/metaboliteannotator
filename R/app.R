@@ -176,7 +176,7 @@ ui <- shiny::navbarPage(
              )
          )
     ),
-    tabPanel("2. AI-assisted Identification",
+    tabPanel("2. AI-assisted Name Matching",
          fluidRow(
              column(3,
                  wellPanel(
@@ -302,14 +302,27 @@ ui <- shiny::navbarPage(
                          helpText("Check to clear all current model results before starting.")
                      ),
 
-                     shiny::actionButton("runAI", "Start AI Identification", class = "btn-primary")
+                    shiny::actionButton("runAI", "Start AI-assisted Matching", class = "btn-primary"),
+                    shiny::tags$div(
+                        style = "margin-top: 15px; color: #555555;",
+                        shiny::tags$p(
+                            shiny::icon("exclamation-circle"),
+                            shiny::tags$strong(" Data Privacy Notice")
+                        ),
+                        shiny::tags$p(
+                            "The AI-model API key you provide remains confined to this session's ephemeral environment and is neither stored on disk nor disclosed to ANY third party."
+                        ),
+                        shiny::tags$p(
+                            "By proceeding, you acknowledge that your compound names will be transmitted to the selected AI model for processing."
+                        )
+                    )
                  )
              ),
              column(9,
                  div(
                      style = "background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
-                     h4("AI Identification Results", style = "margin-bottom: 15px;"),
-                     helpText("Review the AI-identified candidate compounds below. You can adjust the selection for each compound."),
+                     h4("AI-assisted Matching Results", style = "margin-bottom: 15px;"),
+                     helpText("Review the AI-assisted Matching compounds below. You can adjust the selection for each compound."),
                      DT::DTOutput("aiResultsTable"),
                      div(
                          style = "margin-top: 20px; text-align: right;",
@@ -320,7 +333,7 @@ ui <- shiny::navbarPage(
                  ),
                  div(
                      style = "margin-top: 20px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
-                     h4("AI Identification Log", style = "margin-bottom: 15px;"),
+                     h4("Processing Log", style = "margin-bottom: 15px;"),
                      div(
                          id = "aiConsole",
                          style = "height: 200px; overflow-y: auto; background: #000000; padding: 10px; border-radius: 5px;",
@@ -1996,8 +2009,6 @@ server <- function(input, output, session) {
         })
     })
 
-    ## === 新增服务器端: 复制CID 和 KEGG ID+HMDB ID 功能 ===
-
     # 复制 final_compound_results.csv 中的 "CID" 列到剪贴板
     shiny::observeEvent(input$copyCID, {
       final_results_path <- file.path(APP_PATHS$process, 'final_compound_results.csv')
@@ -2017,7 +2028,6 @@ server <- function(input, output, session) {
       }
     })
 
-    # 复制 final_compound_results.csv 中合并后的 "KEGG_ID" 与 "HMDB_ID"
     shiny::observeEvent(input$copyKEGGHMDB, {
       final_results_path <- file.path(APP_PATHS$process, 'final_compound_results.csv')
       if(file.exists(final_results_path)){
@@ -2050,18 +2060,6 @@ server <- function(input, output, session) {
 
 #' Construct Shiny application object
 app <- shiny::shinyApp(ui = ui, server = server)
-
-#' #' Run Shiny UI
-#' #'
-#' #' This function launches the Shiny application.
-#' #'
-#' #' @export
-#' run_ui <- function() {
-#'     if (!exists("APP_PATHS", envir = .GlobalEnv)) {
-#'        stop("Please call init_app() first to initialize the working directory")
-#'     }
-#'     suppressWarnings(app)
-#' }
 
 # Return the app object when this file is sourced via shiny::runApp
 app
