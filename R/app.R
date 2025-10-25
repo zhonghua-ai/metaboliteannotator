@@ -1,4 +1,14 @@
 source('R/00_app_function.R')
+library(ellmer)
+library(tidyverse)
+library(shinyjs)
+library(shinyWidgets)
+library(shinydashboard)
+library(shinythemes)
+library(shinycssloaders)
+library(shinyBS)
+library(shinyalert)
+library(shiny)
 get_instruction_content <- function() {
     candidate_paths <- c(
         "readme.md",
